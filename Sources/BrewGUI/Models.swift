@@ -2,7 +2,9 @@ import Foundation
 
 public enum AppConstants {
     /// 版本格式: 版本号.修订号(用法兼容的修订).日期号(YYMMDD)
-    public static let versionString = "1.5.261105"
+    public static let versionString = "1.6.261106"
+    public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
+    public static let githubMirrorPrefix = "https://ghfast.top/"
 
     public static func formatBytes(_ bytes: Int64) -> String {
         let formatter = ByteCountFormatter()
@@ -10,6 +12,32 @@ public enum AppConstants {
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
     }
+}
+
+public struct RemoteVersionInfo: Codable, Equatable, Sendable {
+    public let version: String
+    public let release_date: String
+    public let download_url: String
+    public let sha256: String
+    public let release_page: String?
+
+    public init(version: String, release_date: String, download_url: String, sha256: String, release_page: String? = nil) {
+        self.version = version
+        self.release_date = release_date
+        self.download_url = download_url
+        self.sha256 = sha256
+        self.release_page = release_page
+    }
+}
+
+public enum AppSelfUpdateState: Equatable, Sendable {
+    case idle
+    case checking
+    case upToDate(String)
+    case updateAvailable(RemoteVersionInfo)
+    case downloading(RemoteVersionInfo, Double)
+    case verifyingAndInstalling(RemoteVersionInfo)
+    case failed(String)
 }
 
 public enum AutoUpdateInterval: Int, CaseIterable, Identifiable, Sendable {
@@ -21,9 +49,9 @@ public enum AutoUpdateInterval: Int, CaseIterable, Identifiable, Sendable {
 
     public var label: String {
         switch self {
-        case .off: return "关闭"
-        case .hours12: return "12小时"
-        case .hours72: return "72小时"
+        case .off: return tr("关闭", "關閉", "Off")
+        case .hours12: return tr("12小时", "12小時", "12h")
+        case .hours72: return tr("72小时", "72小時", "72h")
         }
     }
 }
@@ -167,13 +195,15 @@ public struct ActiveDownloadInfo: Equatable, Sendable {
 
     public var formattedSummary: String {
         let dlStr = AppConstants.formatBytes(downloadedBytes)
-        let speedStr = speedBytesPerSec > 0 ? "\(AppConstants.formatBytes(Int64(speedBytesPerSec)))/s" : "计算速度中…"
+        let speedStr = speedBytesPerSec > 0
+            ? "\(AppConstants.formatBytes(Int64(speedBytesPerSec)))/s"
+            : tr("计算速度中…", "計算速度中…", "Calculating…")
         if let total = totalBytes, total > 0 {
             let totalStr = AppConstants.formatBytes(total)
             let pct = Int(min(100, max(0, (Double(downloadedBytes) / Double(total)) * 100)))
             return "\(fileName): \(dlStr) / \(totalStr) (\(pct)%) · \(speedStr)"
         } else {
-            return "\(fileName): 已下载 \(dlStr) · \(speedStr)"
+            return "\(fileName): \(tr("已下载", "已下載", "Downloaded")) \(dlStr) · \(speedStr)"
         }
     }
 }

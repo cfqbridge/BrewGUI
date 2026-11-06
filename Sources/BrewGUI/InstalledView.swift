@@ -7,6 +7,19 @@ public enum InstalledFilterCategory: String, CaseIterable, Identifiable {
     case casks = "Cask"
 
     public var id: String { rawValue }
+
+    public var localizedLabel: String {
+        switch self {
+        case .all:
+            return tr("全部", "全部", "All")
+        case .outdated:
+            return tr("可更新", "可更新", "Outdated")
+        case .formulae:
+            return "Formula"
+        case .casks:
+            return "Cask"
+        }
+    }
 }
 
 public struct InstalledView: View {
@@ -46,12 +59,12 @@ public struct InstalledView: View {
         VStack(spacing: 0) {
             // Top Toolbar Bar
             HStack(spacing: 12) {
-                Picker("分类", selection: $store.installedCategory) {
+                Picker(tr("分类", "分類", "Category"), selection: $store.installedCategory) {
                     ForEach(InstalledFilterCategory.allCases) { item in
                         if item == .outdated && store.outdatedCount > 0 {
-                            Text("\(item.rawValue) (\(store.outdatedCount))").tag(item)
+                            Text("\(item.localizedLabel) (\(store.outdatedCount))").tag(item)
                         } else {
-                            Text(item.rawValue).tag(item)
+                            Text(item.localizedLabel).tag(item)
                         }
                     }
                 }
@@ -59,10 +72,10 @@ public struct InstalledView: View {
                 .labelsHidden()
                 .fixedSize()
 
-                Toggle("显示全部依赖包", isOn: $store.showAllDependencies)
+                Toggle(tr("显示全部依赖包", "顯示全部依賴套件", "Show All Dependencies"), isOn: $store.showAllDependencies)
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .help("关闭时仅展示主动安装的顶层包 (brew leaves + Casks)")
+                    .help(tr("关闭时仅展示主动安装的顶层包 (brew leaves + Casks)", "關閉時僅展示主動安裝的頂層套件 (brew leaves + Casks)", "When off, only shows top-level installed packages (brew leaves + Casks)"))
 
                 Spacer()
 
@@ -70,14 +83,14 @@ public struct InstalledView: View {
                     Button {
                         Task { await store.refreshInstalled() }
                     } label: {
-                        Label("刷新列表", systemImage: "arrow.clockwise")
+                        Label(tr("刷新列表", "重新整理", "Refresh"), systemImage: "arrow.clockwise")
                     }
                     .disabled(store.isLoadingInstalled)
 
                     Button {
                         store.checkUpdates()
                     } label: {
-                        Label("检查更新 (update)", systemImage: "icloud.and.arrow.down")
+                        Label(tr("检查更新 (update)", "檢查更新 (update)", "Check Updates (update)"), systemImage: "icloud.and.arrow.down")
                     }
                     .buttonStyle(.bordered)
 
@@ -85,9 +98,15 @@ public struct InstalledView: View {
                         store.upgradeAll()
                     } label: {
                         if store.outdatedCount > 0 {
-                            Label("全部升级 (\(store.outdatedCount))", systemImage: "arrow.up.circle.fill")
+                            Label(
+                                tr("全部升级 (\(store.outdatedCount))", "全部升級 (\(store.outdatedCount))", "Upgrade All (\(store.outdatedCount))"),
+                                systemImage: "arrow.up.circle.fill"
+                            )
                         } else {
-                            Label("全部升级 (upgrade)", systemImage: "arrow.up.circle")
+                            Label(
+                                tr("全部升级 (upgrade)", "全部升級 (upgrade)", "Upgrade All (upgrade)"),
+                                systemImage: "arrow.up.circle"
+                            )
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -103,8 +122,11 @@ public struct InstalledView: View {
             HStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("在已安装包中筛选名称或描述…", text: $store.installedSearchText)
-                    .textFieldStyle(.plain)
+                TextField(
+                    tr("在已安装包中筛选名称或描述…", "在已安裝套件中篩選名稱或描述…", "Filter installed packages by name or description…"),
+                    text: $store.installedSearchText
+                )
+                .textFieldStyle(.plain)
                 if !store.installedSearchText.isEmpty {
                     Button {
                         store.installedSearchText = ""
@@ -117,9 +139,15 @@ public struct InstalledView: View {
 
                 Spacer()
 
-                Text("共显示 \(filteredPackages.count) / \(store.installedPackages.count) 个包")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    tr(
+                        "共显示 \(filteredPackages.count) / \(store.installedPackages.count) 个包",
+                        "共顯示 \(filteredPackages.count) / \(store.installedPackages.count) 個套件",
+                        "Showing \(filteredPackages.count) / \(store.installedPackages.count) packages"
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -143,7 +171,7 @@ public struct InstalledView: View {
             if store.isLoadingInstalled && store.installedPackages.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("正在读取已安装的 Homebrew 软件包…")
+                    Text(tr("正在读取已安装的 Homebrew 软件包…", "正在讀取已安裝的 Homebrew 軟體套件…", "Loading installed Homebrew packages…"))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -152,7 +180,7 @@ public struct InstalledView: View {
                     Image(systemName: "shippingbox")
                         .font(.system(size: 36))
                         .foregroundStyle(.secondary)
-                    Text("没有符合筛选条件的软件包")
+                    Text(tr("没有符合筛选条件的软件包", "沒有符合篩選條件的軟體套件", "No packages match the current filter"))
                         .font(.headline)
                         .foregroundStyle(.secondary)
                 }
@@ -172,7 +200,11 @@ public struct InstalledView: View {
             }
         }
         .confirmationDialog(
-            "确认卸载 \(store.packagePendingUninstall?.displayName ?? "")？",
+            tr(
+                "确认卸载 \(store.packagePendingUninstall?.displayName ?? "")？",
+                "確認解除安裝 \(store.packagePendingUninstall?.displayName ?? "")？",
+                "Uninstall \(store.packagePendingUninstall?.displayName ?? "")?"
+            ),
             isPresented: Binding(
                 get: { store.packagePendingUninstall != nil },
                 set: { if !$0 { store.packagePendingUninstall = nil } }
@@ -181,30 +213,42 @@ public struct InstalledView: View {
         ) {
             if let pkg = store.packagePendingUninstall {
                 if pkg.type == .cask {
-                    Button("普通卸载 (仅移除 /Applications 应用)", role: .destructive) {
+                    Button(tr("普通卸载 (仅移除 /Applications 应用)", "一般解除安裝 (僅移除 /Applications 應用)", "Standard Uninstall (remove app only)"), role: .destructive) {
                         store.uninstallPackage(pkg, zap: false)
                         store.packagePendingUninstall = nil
                     }
-                    Button("彻底卸载 (--zap 含配置与缓存残留)", role: .destructive) {
+                    Button(tr("彻底卸载 (--zap 含配置与缓存残留)", "徹底解除安裝 (--zap 含設定與快取殘留)", "Thorough Uninstall (--zap including prefs & caches)"), role: .destructive) {
                         store.uninstallPackage(pkg, zap: true)
                         store.packagePendingUninstall = nil
                     }
                 } else {
-                    Button("卸载 \(pkg.displayName)", role: .destructive) {
+                    Button("\(tr("卸载", "解除安裝", "Uninstall")) \(pkg.displayName)", role: .destructive) {
                         store.uninstallPackage(pkg, zap: false)
                         store.packagePendingUninstall = nil
                     }
                 }
             }
-            Button("取消", role: .cancel) {
+            Button(tr("取消", "取消", "Cancel"), role: .cancel) {
                 store.packagePendingUninstall = nil
             }
         } message: {
             if let pkg = store.packagePendingUninstall {
                 if pkg.type == .cask {
-                    Text("「普通卸载」执行 `brew uninstall --cask \(pkg.name)`；「彻底卸载」额外附加 `--zap` 参数清理 ~/Library 下的关联配置与缓存。")
+                    Text(
+                        tr(
+                            "「普通卸载」执行 `brew uninstall --cask \(pkg.name)`；「彻底卸载」额外附加 `--zap` 参数清理 ~/Library 下的关联配置与缓存。",
+                            "「一般解除安裝」執行 `brew uninstall --cask \(pkg.name)`；「徹底解除安裝」額外附加 `--zap` 參數清理 ~/Library 下的關聯設定與快取。",
+                            "Standard uninstall runs `brew uninstall --cask \(pkg.name)`; Thorough uninstall adds `--zap` to also remove related preferences and caches in ~/Library."
+                        )
+                    )
                 } else {
-                    Text("将执行 `brew uninstall \(pkg.name)`。")
+                    Text(
+                        tr(
+                            "将执行 `brew uninstall \(pkg.name)`。",
+                            "將執行 `brew uninstall \(pkg.name)`。",
+                            "Will execute `brew uninstall \(pkg.name)`."
+                        )
+                    )
                 }
             }
         }
@@ -238,22 +282,22 @@ private struct InstalledPackageRow: View {
                     )
 
                     if !pkg.isTopLevel {
-                        BadgeView(text: "依赖包", color: .gray)
+                        BadgeView(text: tr("依赖包", "依賴套件", "Dependency"), color: .gray)
                     }
 
                     if pkg.isPinned {
-                        BadgeView(text: "已锁定 (Pinned)", color: .orange)
+                        BadgeView(text: tr("已锁定 (Pinned)", "已鎖定 (Pinned)", "Pinned"), color: .orange)
                     }
 
                     if pkg.hasBundleVersionMismatch {
-                        BadgeView(text: "本地未覆盖 (需同步更新)", color: .orange)
+                        BadgeView(text: tr("本地未覆盖 (需同步更新)", "本機未覆蓋 (需同步更新)", "On-disk mismatch (Needs sync)"), color: .orange)
                     }
 
                     if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
                         let isLarge = sizeBytes >= 150 * 1024 * 1024
                         BadgeView(
                             text: isLarge
-                                ? "📦 \(AppConstants.formatBytes(sizeBytes)) (大体积包，建议单独升级)"
+                                ? "📦 \(AppConstants.formatBytes(sizeBytes)) \(tr("(大体积包，建议单独升级)", "(大體積套件，建議單獨升級)", "(Large installer)"))"
                                 : "📦 \(AppConstants.formatBytes(sizeBytes))",
                             color: isLarge ? .orange : .teal
                         )
@@ -270,13 +314,13 @@ private struct InstalledPackageRow: View {
                 HStack(spacing: 12) {
                     if pkg.hasBundleVersionMismatch {
                         HStack(spacing: 4) {
-                            Text("实际应用: \(pkg.actualBundleVersion ?? "?")")
+                            Text("\(tr("实际应用", "實際應用", "On-disk")): \(pkg.actualBundleVersion ?? "?")")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.orange)
                             Image(systemName: "arrow.right")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
-                            Text("Brew 账面: \(pkg.latestVersion)")
+                            Text("\(tr("Brew 账面", "Brew 帳面", "Brew Cask")): \(pkg.latestVersion)")
                                 .font(.caption.monospaced().weight(.semibold))
                                 .foregroundStyle(.orange)
                         }
@@ -293,7 +337,7 @@ private struct InstalledPackageRow: View {
                                 .foregroundStyle(.orange)
                         }
                     } else {
-                        Text("版本: \(pkg.installedVersion ?? pkg.latestVersion)")
+                        Text("\(tr("版本", "版本", "Version")): \(pkg.installedVersion ?? pkg.latestVersion)")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
@@ -301,7 +345,7 @@ private struct InstalledPackageRow: View {
                     if let url = URL(string: pkg.homepage), !pkg.homepage.isEmpty {
                         Link(destination: url) {
                             HStack(spacing: 2) {
-                                Text("主页")
+                                Text(tr("主页", "首頁", "Homepage"))
                                 Image(systemName: "arrow.up.right.square")
                             }
                             .font(.caption)
@@ -319,7 +363,9 @@ private struct InstalledPackageRow: View {
                         onUpgrade()
                     } label: {
                         Label(
-                            pkg.hasBundleVersionMismatch && !pkg.isOutdated ? "覆盖升级" : "升级",
+                            pkg.hasBundleVersionMismatch && !pkg.isOutdated
+                                ? tr("覆盖升级", "覆蓋升級", "Force Sync")
+                                : tr("升级", "升級", "Upgrade"),
                             systemImage: "arrow.up.circle.fill"
                         )
                     }
@@ -329,8 +375,8 @@ private struct InstalledPackageRow: View {
                     .disabled(pkg.isPinned)
                     .help(
                         pkg.hasBundleVersionMismatch && !pkg.isOutdated
-                            ? "之前使用 --adopt 仅认领了旧版应用而未替换文件，点击将自动退出旧应用并执行 brew reinstall --cask --force 覆盖升级至 \(pkg.latestVersion)"
-                            : "升级 \(pkg.displayName)"
+                            ? tr("之前使用 --adopt 仅认领了旧版应用而未替换文件，点击将自动退出旧应用并执行 brew reinstall --cask --force 覆盖升级至 \(pkg.latestVersion)", "之前使用 --adopt 僅認領了舊版應用而未替換檔案，點擊將自動結束舊應用並執行 brew reinstall --cask --force 覆蓋升級至 \(pkg.latestVersion)", "Previously adopted without overwriting files. Click to quit running app and run brew reinstall --cask --force to update to \(pkg.latestVersion)")
+                            : "\(tr("升级", "升級", "Upgrade")) \(pkg.displayName)"
                     )
                 }
 
@@ -342,7 +388,7 @@ private struct InstalledPackageRow: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help(pkg.isPinned ? "解锁版本 (brew unpin)" : "锁定当前版本防止升级 (brew pin)")
+                    .help(pkg.isPinned ? tr("解锁版本 (brew unpin)", "解鎖版本 (brew unpin)", "Unpin version (brew unpin)") : tr("锁定当前版本防止升级 (brew pin)", "鎖定目前版本防止升級 (brew pin)", "Pin version to prevent upgrades (brew pin)"))
                 }
 
                 Button(role: .destructive) {
@@ -352,7 +398,7 @@ private struct InstalledPackageRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("卸载 \(pkg.name)")
+                .help("\(tr("卸载", "解除安裝", "Uninstall")) \(pkg.name)")
             }
         }
     }

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. 1.5.261105)'
+        description: 'Release version (e.g. 1.6.261106)'
         required: false
-        default: '1.5.261105'
+        default: '1.6.261106'
 
 permissions:
   contents: write
@@ -27,7 +27,7 @@ jobs:
             TAG_NAME="${{ github.ref_name }}"
             VERSION="${TAG_NAME#v}"
           else
-            VERSION="${{ github.event.inputs.version || '1.5.261105' }}"
+            VERSION="${{ github.event.inputs.version || '1.6.261106' }}"
             VERSION="${VERSION#v}"
             TAG_NAME="v${VERSION}"
           fi

@@ -9,9 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v1.5.261105-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v1.6.261106-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
+  <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green.svg" alt="License"></a>
 </p>
 
@@ -60,6 +61,10 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 ### 6. 📊 实时下载监控与任务管控
 - **透明进度监控**：突破非 TTY 管道限制，实时监控底层下载流量增长，直观呈现文件名、下载百分比与实时网速（KB/s、MB/s）。
 - **任务灵活控制**：支持「停止全部」、「跳过当前包 (Skip)」以及失败单项「一键重试」。
+
+### 7. 🌐 多语言国际化与应用内免拦截自更新 (v1.6)
+- **三语实时热切换**：原生内置 **简体中文 (`zh-Hans`) / 繁體中文 (`zh-Hant`) / English (`en`)**，默认智能跟随 macOS 系统语言，支持在主窗口侧边栏底部或菜单栏面板一键切换、零延迟生效（无需重启应用）。
+- **应用内 SHA256 校验与一键热更新**：自动比对 GitHub Releases 最新 `version.json`（自带国内加速镜像自动回退），发现新版时一键后台下载 DMG、严格校验 SHA256、静默挂载覆盖并自动清除隔离属性 (`xattr -cr`)，告别手动打开网页与 Gatekeeper 重复弹窗。
 
 ---
 

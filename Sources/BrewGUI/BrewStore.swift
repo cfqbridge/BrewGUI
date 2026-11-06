@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import CryptoKit
 
 @MainActor
 public final class BrewStore: ObservableObject {
@@ -41,7 +42,14 @@ public final class BrewStore: ObservableObject {
     @Published public var batchItems: [BatchInstallItem] = []
     @Published public var batchExportCopiedMessage: String?
 
-    // MenuBar Preferences (Silent Launch at Login & Auto Check Updates)
+    // MenuBar & App Preferences (Language, Silent Launch at Login, Auto Check Updates, Self-Update)
+    @Published public var appLanguage: AppLanguage = AppLanguage.current {
+        didSet {
+            AppLanguage.current = appLanguage
+        }
+    }
+    @Published public var selfUpdateState: AppSelfUpdateState = .idle
+
     @Published public var launchAtLoginSilent: Bool = false {
         didSet {
             guard !isInitializingPreferences else { return }
@@ -104,6 +112,8 @@ public final class BrewStore: ObservableObject {
             Task {
                 await initialLoad()
                 requestAndCheckAppManagementPermission()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                await checkForAppUpdate(userInitiated: false)
             }
         }
     }
@@ -292,6 +302,206 @@ public final class BrewStore: ObservableObject {
             let stamp = Self.dateTimeFormatter.string(from: Date())
             BrewCommandRunner.appendToDiskLog("\n[\(stamp)] [AutoUpdate] Triggered scheduled brew update (interval: \(autoUpdateInterval.label))\n")
             checkUpdates(expandDrawer: false)
+        }
+    }
+
+    // MARK: - In-App Self-Update (Checking version.json, SHA256 Verification & Hot-Swap)
+
+    public static func isRemoteVersionNewer(remote: String, local: String) -> Bool {
+        let cleanRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^v", with: "", options: .regularExpression)
+        let cleanLocal = local.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^v", with: "", options: .regularExpression)
+        if cleanRemote == cleanLocal { return false }
+        return cleanLocal.compare(cleanRemote, options: .numeric) == .orderedAscending
+    }
+
+    public func checkForAppUpdate(userInitiated: Bool = false) async {
+        switch selfUpdateState {
+        case .checking, .downloading, .verifyingAndInstalling:
+            return
+        default:
+            break
+        }
+        if userInitiated {
+            selfUpdateState = .checking
+        }
+
+        let candidateURLs = [
+            AppConstants.githubVersionJSONURL,
+            AppConstants.githubMirrorPrefix + AppConstants.githubVersionJSONURL
+        ]
+
+        var fetchedInfo: RemoteVersionInfo? = nil
+        var lastErr: String = ""
+
+        for urlStr in candidateURLs {
+            guard let url = URL(string: urlStr) else { continue }
+            var req = URLRequest(url: url)
+            req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            req.timeoutInterval = 8.0
+            req.setValue("BrewGUI/\(AppConstants.versionString)", forHTTPHeaderField: "User-Agent")
+            do {
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                if let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                   let decoded = try? JSONDecoder().decode(RemoteVersionInfo.self, from: data) {
+                    fetchedInfo = decoded
+                    break
+                }
+            } catch {
+                lastErr = error.localizedDescription
+            }
+        }
+
+        guard let remote = fetchedInfo else {
+            if userInitiated {
+                selfUpdateState = .failed(tr("检查更新失败", "檢查更新失敗", "Update check failed"))
+                BrewCommandRunner.appendToDiskLog("[SelfUpdate] Check failed: \(lastErr)\n")
+            }
+            return
+        }
+
+        if Self.isRemoteVersionNewer(remote: remote.version, local: AppConstants.versionString) {
+            selfUpdateState = .updateAvailable(remote)
+            BrewCommandRunner.appendToDiskLog("[SelfUpdate] Update available: v\(remote.version) (current: v\(AppConstants.versionString))\n")
+        } else {
+            selfUpdateState = .upToDate(remote.version)
+            BrewCommandRunner.appendToDiskLog("[SelfUpdate] Already up to date (v\(AppConstants.versionString), remote: v\(remote.version))\n")
+        }
+    }
+
+    public func performAppSelfUpdate(_ remote: RemoteVersionInfo) {
+        Task { @MainActor in
+            selfUpdateState = .downloading(remote, 0.02)
+            let stamp = Self.dateTimeFormatter.string(from: Date())
+            appendLog("\n[\(stamp)] [SelfUpdate] \(tr("开始下载 BrewGUI", "開始下載 BrewGUI", "Downloading BrewGUI")) v\(remote.version)…\n")
+
+            let candidateDownloadURLs = [
+                remote.download_url,
+                AppConstants.githubMirrorPrefix + remote.download_url
+            ]
+
+            var downloadedData: Data? = nil
+            var lastErrorMsg = ""
+
+            for urlStr in candidateDownloadURLs {
+                guard let url = URL(string: urlStr) else { continue }
+                var req = URLRequest(url: url)
+                req.timeoutInterval = 60.0
+                req.setValue("BrewGUI/\(AppConstants.versionString)", forHTTPHeaderField: "User-Agent")
+                do {
+                    let (bytesStream, resp) = try await URLSession.shared.bytes(for: req)
+                    guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                        continue
+                    }
+                    let expectedLen = max(http.expectedContentLength, 3_000_000)
+                    var buffer = Data()
+                    buffer.reserveCapacity(Int(expectedLen))
+                    var lastReportBytes = 0
+                    for try await byte in bytesStream {
+                        buffer.append(byte)
+                        if buffer.count - lastReportBytes >= 98_304 {
+                            lastReportBytes = buffer.count
+                            let prog = min(0.98, max(0.05, Double(buffer.count) / Double(expectedLen)))
+                            self.selfUpdateState = .downloading(remote, prog)
+                        }
+                    }
+                    if buffer.count > 100_000 {
+                        downloadedData = buffer
+                        break
+                    }
+                } catch {
+                    lastErrorMsg = error.localizedDescription
+                }
+            }
+
+            guard let dmgData = downloadedData else {
+                let msg = tr("下载更新包失败", "下載更新包失敗", "Failed to download update")
+                selfUpdateState = .failed(msg)
+                appendLog("[SelfUpdate] ✗ \(msg): \(lastErrorMsg)\n")
+                return
+            }
+
+            selfUpdateState = .verifyingAndInstalling(remote)
+
+            // Verify SHA256 checksum
+            let digest = SHA256.hash(data: dmgData)
+            let calculatedSHA256 = digest.map { String(format: "%02x", $0) }.joined().lowercased()
+            let expectedSHA256 = remote.sha256.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+            if !expectedSHA256.isEmpty && calculatedSHA256 != expectedSHA256 {
+                let msg = tr("SHA256 校验失败，已中止更新", "SHA256 校驗失敗，已中止更新", "SHA256 mismatch, update aborted")
+                selfUpdateState = .failed(msg)
+                appendLog("[SelfUpdate] ✗ \(msg) (expected: \(expectedSHA256), actual: \(calculatedSHA256))\n")
+                return
+            }
+
+            appendLog("[SelfUpdate] ✓ SHA256 \(tr("校验通过", "校驗通過", "verified")) (\(calculatedSHA256.prefix(12))…)\n")
+
+            let fm = FileManager.default
+            let dmgURL = URL(fileURLWithPath: "/tmp/BrewGUI-Update-\(remote.version).dmg")
+            let mountDir = "/tmp/BrewGUI_Mount_\(UUID().uuidString.prefix(8))"
+
+            do {
+                try? fm.removeItem(at: dmgURL)
+                try dmgData.write(to: dmgURL, options: .atomic)
+                try fm.createDirectory(atPath: mountDir, withIntermediateDirectories: true)
+
+                let attachProc = Process()
+                attachProc.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+                attachProc.arguments = ["attach", "-nobrowse", "-readonly", "-mountpoint", mountDir, dmgURL.path]
+                try attachProc.run()
+                attachProc.waitUntilExit()
+
+                let mountedAppPath = "\(mountDir)/BrewGUI.app"
+                guard attachProc.terminationStatus == 0, fm.fileExists(atPath: mountedAppPath) else {
+                    let msg = tr("挂载更新镜像失败", "掛載更新映像失敗", "Failed to mount update DMG")
+                    selfUpdateState = .failed(msg)
+                    appendLog("[SelfUpdate] ✗ \(msg)\n")
+                    return
+                }
+
+                let currentBundleURL = Bundle.main.bundleURL
+                let targetAppPath: String = {
+                    if currentBundleURL.pathExtension == "app" && !currentBundleURL.path.hasPrefix("/Volumes/") {
+                        return currentBundleURL.path
+                    }
+                    return "/Applications/BrewGUI.app"
+                }()
+
+                let currentPID = ProcessInfo.processInfo.processIdentifier
+                let updaterScriptPath = "/tmp/brewgui_apply_update.sh"
+                let scriptContent = """
+                #!/bin/zsh
+                for i in {1..20}; do
+                    if ! kill -0 \(currentPID) 2>/dev/null; then
+                        break
+                    fi
+                    sleep 0.2
+                done
+                rm -rf "\(targetAppPath)"
+                cp -R "\(mountedAppPath)" "\(targetAppPath)"
+                /usr/bin/xattr -cr "\(targetAppPath)" 2>/dev/null || true
+                /usr/bin/hdiutil detach "\(mountDir)" -force >/dev/null 2>&1 || true
+                rm -rf "\(mountDir)" "\(dmgURL.path)" "$0" 2>/dev/null || true
+                /usr/bin/open "\(targetAppPath)"
+                """
+                try scriptContent.write(toFile: updaterScriptPath, atomically: true, encoding: .utf8)
+                try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: updaterScriptPath)
+
+                appendLog("[SelfUpdate] \(tr("正在应用更新并重启 BrewGUI…", "正在套用更新並重啟 BrewGUI…", "Applying update and restarting BrewGUI…"))\n")
+
+                let launcher = Process()
+                launcher.executableURL = URL(fileURLWithPath: "/usr/bin/nohup")
+                launcher.arguments = ["/bin/zsh", updaterScriptPath]
+                launcher.standardOutput = FileHandle.nullDevice
+                launcher.standardError = FileHandle.nullDevice
+                try launcher.run()
+
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                NSApplication.shared.terminate(nil)
+            } catch {
+                selfUpdateState = .failed(error.localizedDescription)
+                appendLog("[SelfUpdate] ✗ Error: \(error.localizedDescription)\n")
+            }
         }
     }
 
@@ -778,9 +988,9 @@ public final class BrewStore: ObservableObject {
             installCatalogEntry(formulaEntries[0])
         } else if formulaEntries.count > 1 {
             let names = formulaEntries.map(\.name)
-            let preview = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " 等" : "")
+            let preview = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? tr(" 等", " 等", "…") : "")
             enqueueTask(
-                title: "批量安装 \(names.count) 个 Formula (\(preview))",
+                title: tr("批量安装 \(names.count) 个 Formula (\(preview))", "批次安裝 \(names.count) 個 Formula (\(preview))", "Batch install \(names.count) Formulae (\(preview))"),
                 arguments: ["install", "--formula"] + names
             )
         }
@@ -952,7 +1162,7 @@ public final class BrewStore: ObservableObject {
 
     public func runCleanupAllCaches() {
         enqueueTask(
-            title: "清理全部下载缓存与旧版本 (brew cleanup --prune=all)",
+            title: tr("清理全部下载缓存与旧版本 (brew cleanup --prune=all)", "清理全部下載快取與舊版本 (brew cleanup --prune=all)", "Clean all download caches & old versions (brew cleanup --prune=all)"),
             arguments: ["cleanup", "--prune=all"]
         )
     }
@@ -985,7 +1195,7 @@ public final class BrewStore: ObservableObject {
 
     public func runAutoremoveOrphans() {
         enqueueTask(
-            title: "清理无用孤儿依赖 (brew autoremove)",
+            title: tr("清理无用孤儿依赖 (brew autoremove)", "清理無用孤兒依賴 (brew autoremove)", "Remove unused orphan dependencies (brew autoremove)"),
             arguments: ["autoremove"]
         )
     }
@@ -995,7 +1205,7 @@ public final class BrewStore: ObservableObject {
     public func checkUpdates(expandDrawer: Bool = true) {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "BrewGUI.lastAutoUpdateTimestamp")
         enqueueTask(
-            title: "检查更新 (brew update)",
+            title: tr("检查更新 (brew update)", "檢查更新 (brew update)", "Check for updates (brew update)"),
             arguments: ["update"],
             allowAutoUpdate: true,
             rebuildCatalogAfter: true,
@@ -1020,9 +1230,9 @@ public final class BrewStore: ObservableObject {
             upgradePackage(outdatedFormulae[0])
         } else if outdatedFormulae.count > 1 {
             let names = outdatedFormulae.map(\.name)
-            let preview = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " 等" : "")
+            let preview = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? tr(" 等", " 等", "…") : "")
             enqueueTask(
-                title: "升级 \(names.count) 个 Formula (\(preview))",
+                title: tr("升级 \(names.count) 个 Formula (\(preview))", "升級 \(names.count) 個 Formula (\(preview))", "Upgrade \(names.count) Formulae (\(preview))"),
                 arguments: ["upgrade", "--formula"] + names
             )
         }
@@ -1034,7 +1244,7 @@ public final class BrewStore: ObservableObject {
         // Fallback if no local outdated flags were set when user explicitly triggered upgradeAll
         if mismatchedCasks.isEmpty && outdatedFormulae.isEmpty && outdatedCasks.isEmpty {
             enqueueTask(
-                title: "升级全部可更新包 (brew upgrade)",
+                title: tr("升级全部可更新包 (brew upgrade)", "升級全部可更新套件 (brew upgrade)", "Upgrade all outdated packages (brew upgrade)"),
                 arguments: ["upgrade"]
             )
         }
@@ -1049,10 +1259,10 @@ public final class BrewStore: ObservableObject {
             ? ["upgrade", "--cask", pkg.name]
             : ["upgrade", pkg.name]
         enqueueTask(
-            title: "升级 \(pkg.displayName)",
+            title: "\(tr("升级", "升級", "Upgrade")) \(pkg.displayName)",
             arguments: args,
             appBundlesToQuit: pkg.type == .cask ? pkg.appBundles : [],
-            quitReason: "完成升级与文件覆盖"
+            quitReason: tr("完成升级与文件覆盖", "完成升級與檔案覆蓋", "complete upgrade and overwrite")
         )
     }
 
@@ -1061,10 +1271,10 @@ public final class BrewStore: ObservableObject {
             ? ["reinstall", "--cask", "--force", pkg.name]
             : ["reinstall", pkg.name]
         enqueueTask(
-            title: "覆盖同步 \(pkg.displayName) 至 \(pkg.latestVersion)",
+            title: tr("覆盖同步 \(pkg.displayName) 至 \(pkg.latestVersion)", "覆蓋同步 \(pkg.displayName) 至 \(pkg.latestVersion)", "Force sync \(pkg.displayName) to \(pkg.latestVersion)"),
             arguments: args,
             appBundlesToQuit: pkg.type == .cask ? pkg.appBundles : [],
-            quitReason: "完成文件覆盖更新"
+            quitReason: tr("完成文件覆盖更新", "完成檔案覆蓋更新", "complete file overwrite update")
         )
     }
 
@@ -1077,17 +1287,21 @@ public final class BrewStore: ObservableObject {
         }
         args.append(pkg.name)
         enqueueTask(
-            title: zap ? "彻底卸载 \(pkg.displayName) (--zap)" : "卸载 \(pkg.displayName)",
+            title: zap
+                ? tr("彻底卸载 \(pkg.displayName) (--zap)", "徹底解除安裝 \(pkg.displayName) (--zap)", "Zap uninstall \(pkg.displayName) (--zap)")
+                : tr("卸载 \(pkg.displayName)", "解除安裝 \(pkg.displayName)", "Uninstall \(pkg.displayName)"),
             arguments: args,
             appBundlesToQuit: pkg.type == .cask ? pkg.appBundles : [],
-            quitReason: "完成卸载"
+            quitReason: tr("完成卸载", "完成解除安裝", "complete uninstallation")
         )
     }
 
     public func togglePin(_ pkg: BrewPackage) {
         guard pkg.type == .formula else { return }
         let cmd = pkg.isPinned ? "unpin" : "pin"
-        let actionLabel = pkg.isPinned ? "解锁版本" : "锁定版本"
+        let actionLabel = pkg.isPinned
+            ? tr("解锁版本", "解鎖版本", "Unpin")
+            : tr("锁定版本", "鎖定版本", "Pin")
         enqueueTask(
             title: "\(actionLabel) \(pkg.name)",
             arguments: [cmd, pkg.name]
@@ -1103,24 +1317,26 @@ public final class BrewStore: ObservableObject {
         }
         args.append(entry.name)
         enqueueTask(
-            title: forceOverwrite ? "接管并升级 \(entry.displayName) (--force)" : "安装 \(entry.displayName)",
+            title: forceOverwrite
+                ? tr("接管并升级 \(entry.displayName) (--force)", "接管並升級 \(entry.displayName) (--force)", "Adopt & upgrade \(entry.displayName) (--force)")
+                : "\(tr("安装", "安裝", "Install")) \(entry.displayName)",
             arguments: args,
             appBundlesToQuit: (entry.type == .cask && forceOverwrite) ? entry.appBundles : [],
-            quitReason: "完成接管与文件覆盖更新"
+            quitReason: tr("完成接管与文件覆盖更新", "完成接管與檔案覆蓋更新", "complete adopt and overwrite")
         )
     }
 
     public func adoptCask(token: String, displayName: String, appBundles: [String] = [], forceOverwriteToUpgrade: Bool = false) {
         if forceOverwriteToUpgrade {
             enqueueTask(
-                title: "接管并升级 \(displayName) (--force 覆盖旧版)",
+                title: tr("接管并升级 \(displayName) (--force 覆盖旧版)", "接管並升級 \(displayName) (--force 覆蓋舊版)", "Adopt & upgrade \(displayName) (--force)"),
                 arguments: ["install", "--cask", "--force", token],
                 appBundlesToQuit: appBundles,
-                quitReason: "完成接管与文件覆盖更新"
+                quitReason: tr("完成接管与文件覆盖更新", "完成接管與檔案覆蓋更新", "complete adopt and overwrite")
             )
         } else {
             enqueueTask(
-                title: "接管应用 \(displayName) (--adopt 仅认领)",
+                title: tr("接管应用 \(displayName) (--adopt 仅认领)", "接管應用程式 \(displayName) (--adopt 僅認領)", "Adopt app \(displayName) (--adopt)"),
                 arguments: ["install", "--cask", "--adopt", token]
             )
         }
@@ -1140,7 +1356,7 @@ public final class BrewStore: ObservableObject {
         if !aborted.isEmpty {
             lastFailedOrSkippedTasks = aborted
         }
-        appendLog("\n[用户操作] ⏹ 已请求停止当前任务并清空等待队列…\n")
+        appendLog("\n\(tr("[用户操作] ⏹ 已请求停止当前任务并清空等待队列…", "[使用者操作] ⏹ 已請求停止目前任務並清空等待佇列…", "[User Action] ⏹ Stopping current task and clearing queue…"))\n")
         Task {
             await BrewCommandRunner.shared.terminateActiveProcess()
         }
@@ -1149,7 +1365,7 @@ public final class BrewStore: ObservableObject {
     public func skipCurrentTask() {
         guard let running = currentTask, running.status == .running else { return }
         skipCurrentRequested = true
-        appendLog("\n[用户操作] ⏭ 已请求跳过当前任务 (\(running.title))，正在切换至下一队列任务…\n")
+        appendLog("\n\(tr("[用户操作] ⏭ 已请求跳过当前任务 (\(running.title))，正在切换至下一队列任务…", "[使用者操作] ⏭ 已請求略過目前任務 (\(running.title))，正在切換至下一佇列任務…", "[User Action] ⏭ Skipping current task (\(running.title)), moving to next queued task…"))\n")
         Task {
             await BrewCommandRunner.shared.terminateActiveProcess()
         }
@@ -1316,7 +1532,7 @@ public final class BrewStore: ObservableObject {
             let bundleFile = bundleURL.lastPathComponent
             let execName = (bundleFile as NSString).deletingPathExtension.lowercased()
             if appBundles.contains(bundleFile) || targetNames.contains(execName) {
-                appendLog("[提示] 检测到 \(bundleFile) 正在运行，正在请求安全退出以\(reason)…\n")
+                appendLog(tr("[提示] 检测到 \(bundleFile) 正在运行，正在请求安全退出以\(reason)…\n", "[提示] 偵測到 \(bundleFile) 正在執行，正在請求安全結束以\(reason)…\n", "[Info] Detected running \(bundleFile), requesting termination to \(reason)…\n"))
                 runningApp.terminate()
             }
         }
@@ -1409,7 +1625,7 @@ public final class BrewStore: ObservableObject {
                 if stopAllRequested {
                     task.status = .cancelled
                     currentTask = task
-                    appendLog("[\(endStamp)] ⏹ 已停止 (\(task.title))\n")
+                    appendLog("[\(endStamp)] ⏹ \(tr("已停止", "已停止", "Stopped")) (\(task.title))\n")
                     break
                 } else if skipCurrentRequested {
                     task.status = .skipped
@@ -1417,19 +1633,19 @@ public final class BrewStore: ObservableObject {
                     if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
                         lastFailedOrSkippedTasks.append(task)
                     }
-                    appendLog("[\(endStamp)] ⏭ 已跳过 (\(task.title))\n")
+                    appendLog("[\(endStamp)] ⏭ \(tr("已跳过", "已略過", "Skipped")) (\(task.title))\n")
                 } else if exitCode == 0 {
                     task.status = .succeeded
                     currentTask = task
                     lastFailedOrSkippedTasks.removeAll { $0.commandDescription == task.commandDescription }
-                    appendLog("[\(endStamp)] ✓ 完成 (\(task.title))\n")
+                    appendLog("[\(endStamp)] ✓ \(tr("完成", "完成", "Completed")) (\(task.title))\n")
                 } else {
                     task.status = .failed
                     currentTask = task
                     if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
                         lastFailedOrSkippedTasks.append(task)
                     }
-                    appendLog("[\(endStamp)] ✗ 失败，退出码 \(exitCode) (\(task.title))\n")
+                    appendLog("[\(endStamp)] ✗ \(tr("失败，退出码", "失敗，退出碼", "Failed with exit code")) \(exitCode) (\(task.title))\n")
                 }
             } catch {
                 task.status = .failed
@@ -1438,7 +1654,7 @@ public final class BrewStore: ObservableObject {
                 if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
                     lastFailedOrSkippedTasks.append(task)
                 }
-                appendLog("\n[错误] 无法启动命令: \(error.localizedDescription)\n")
+                appendLog("\n[\(tr("错误", "錯誤", "Error"))] \(tr("无法启动命令", "無法啟動命令", "Failed to launch command")): \(error.localizedDescription)\n")
             }
         }
 

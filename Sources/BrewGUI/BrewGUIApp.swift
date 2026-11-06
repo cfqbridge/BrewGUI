@@ -10,6 +10,19 @@ public enum NavigationTab: String, CaseIterable, Identifiable {
 
     public var id: String { rawValue }
 
+    public var localizedTitle: String {
+        switch self {
+        case .search:
+            return tr("搜索与安装", "搜尋與安裝", "Search & Install")
+        case .installed:
+            return tr("已安装与更新", "已安裝與更新", "Installed & Updates")
+        case .maintenance:
+            return tr("清理与维护", "清理與維護", "Cleanup & Maintenance")
+        case .batchInstall:
+            return tr("批量安装", "批次安裝", "Batch Install")
+        }
+    }
+
     public var iconName: String {
         switch self {
         case .search: return "magnifyingglass"
@@ -45,17 +58,23 @@ public struct MainWindowView: View {
                             HStack(spacing: 10) {
                                 Image(systemName: "lock.shield.fill")
                                     .foregroundStyle(.orange)
-                                Text("BrewGUI 尚未获得「App 管理权限」，更新或卸载 `/Applications` 下的 Cask 应用时可能会被系统拦截。")
-                                    .font(.caption)
+                                Text(
+                                    tr(
+                                        "BrewGUI 尚未获得「App 管理权限」，更新或卸载 `/Applications` 下的 Cask 应用时可能会被系统拦截。",
+                                        "BrewGUI 尚未取得「App 管理權限」，更新或解除安裝 `/Applications` 下的 Cask 應用時可能會被系統攔截。",
+                                        "BrewGUI does not have \"App Management\" permission yet. Updating or uninstalling Cask apps in `/Applications` may be blocked by macOS."
+                                    )
+                                )
+                                .font(.caption)
                                 Spacer()
-                                Button("前往系统设置开启") {
+                                Button(tr("前往系统设置开启", "前往系統設定開啟", "Open System Settings")) {
                                     store.openSystemAppManagementSettings()
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(.orange)
                                 .controlSize(.mini)
 
-                                Button("重新检测") {
+                                Button(tr("重新检测", "重新偵測", "Recheck")) {
                                     store.requestAndCheckAppManagementPermission()
                                 }
                                 .buttonStyle(.bordered)
@@ -95,7 +114,11 @@ public struct MainWindowView: View {
                         } label: {
                             Image(systemName: "sidebar.left")
                         }
-                        .help(store.isSidebarCollapsed ? "展开侧边栏文字" : "折叠侧边栏为纯图标模式")
+                        .help(
+                            store.isSidebarCollapsed
+                                ? tr("展开侧边栏文字", "展開側邊欄文字", "Expand Sidebar")
+                                : tr("折叠侧边栏为纯图标模式", "折疊側邊欄為純圖示模式", "Collapse Sidebar to Icons")
+                        )
                     }
                 }
             }
@@ -133,7 +156,7 @@ private struct SidebarRailView: View {
                                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                                 .frame(width: 18)
 
-                            Text(tab.rawValue)
+                            Text(tab.localizedTitle)
                                 .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                                 .foregroundStyle(Color.primary)
                                 .lineLimit(1)
@@ -161,28 +184,185 @@ private struct SidebarRailView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help(tab.rawValue)
+                .help(tab.localizedTitle)
             }
 
             Spacer()
 
-            // Version Footer (Hidden when collapsed to icon-only mode)
+            // Self-Update Banner & Version / Language Footer
             if !store.isSidebarCollapsed {
+                selfUpdateSidebarCard
+
                 Divider()
-                HStack {
+
+                HStack(spacing: 6) {
                     Text("v\(AppConstants.versionString)")
                         .font(.caption2.monospaced())
                         .foregroundStyle(.tertiary)
+
+                    Button {
+                        Task { await store.checkForAppUpdate(userInitiated: true) }
+                    } label: {
+                        if store.selfUpdateState == .checking {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(tr("检查 BrewGUI 软件自更新", "檢查 BrewGUI 軟體自更新", "Check for BrewGUI App Updates"))
+
                     Spacer()
+
+                    Menu {
+                        ForEach(AppLanguage.allCases) { lang in
+                            Button {
+                                store.appLanguage = lang
+                            } label: {
+                                HStack {
+                                    Text(lang.displayName)
+                                    if store.appLanguage == lang {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "globe")
+                            Text(store.appLanguage.shortBadgeLabel)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help(tr("切换界面语言 (简体 / 繁體 / English)", "切換介面語言 (简体 / 繁體 / English)", "Switch UI Language"))
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+            } else {
+                // Collapsed Icon-Only Footer: compact language menu
+                Menu {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Button {
+                            store.appLanguage = lang
+                        } label: {
+                            Text(lang.displayName)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "globe")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(tr("切换界面语言", "切換介面語言", "Switch Language"))
             }
         }
         .padding(.horizontal, store.isSidebarCollapsed ? 8 : 10)
         .padding(.vertical, 10)
         .frame(width: store.isSidebarCollapsed ? 52 : 212)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+    }
+
+    @ViewBuilder
+    private var selfUpdateSidebarCard: some View {
+        switch store.selfUpdateState {
+        case .idle:
+            EmptyView()
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text(tr("正在检查新版…", "正在檢查新版…", "Checking updates…"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        case .upToDate:
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption2)
+                Text(tr("当前已是最新版本", "目前已是最新版本", "Up to date"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        case .updateAvailable(let remote):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.orange)
+                    Text("\(tr("发现新版", "發現新版", "New")) v\(remote.version)")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                }
+                Button {
+                    store.performAppSelfUpdate(remote)
+                } label: {
+                    Label(tr("一键热更新", "一鍵熱更新", "Update Now"), systemImage: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.small)
+            }
+            .padding(8)
+            .background(Color.orange.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        case .downloading(let remote, let progress):
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("\(tr("下载", "下載", "Downloading")) v\(remote.version)")
+                        .font(.caption2.weight(.medium))
+                    Spacer()
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: progress)
+                    .controlSize(.mini)
+            }
+            .padding(8)
+            .background(Color.accentColor.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        case .verifyingAndInstalling:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text(tr("正在校验并替换安装…", "正在校驗並替換安裝…", "Verifying & installing…"))
+                    .font(.caption2)
+                Spacer()
+            }
+            .padding(8)
+            .background(Color.green.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        case .failed(let msg):
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption2)
+                Text(msg)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        }
     }
 }
 
@@ -281,23 +461,29 @@ public struct BrewMissingGuideView: View {
                 .foregroundStyle(.orange)
 
             VStack(spacing: 8) {
-                Text("未在当前 Mac 上检测到 Homebrew")
+                Text(tr("未在当前 Mac 上检测到 Homebrew", "未在目前 Mac 上偵測到 Homebrew", "Homebrew Not Detected on This Mac"))
                     .font(.title2.weight(.bold))
 
-                Text("BrewGUI (v\(AppConstants.versionString)) 依赖 Homebrew (`/opt/homebrew/bin/brew`) 管理软件包。请使用下方官方命令完成安装：")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 580)
+                Text(
+                    tr(
+                        "BrewGUI (v\(AppConstants.versionString)) 依赖 Homebrew (`/opt/homebrew/bin/brew`) 管理软件包。请使用下方官方命令完成安装：",
+                        "BrewGUI (v\(AppConstants.versionString)) 依賴 Homebrew (`/opt/homebrew/bin/brew`) 管理軟體套件。請使用下方官方命令完成安裝：",
+                        "BrewGUI (v\(AppConstants.versionString)) requires Homebrew (`/opt/homebrew/bin/brew`) to manage packages. Please install it using the official command below:"
+                    )
+                )
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 580)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("方法一：官方标准安装脚本（推荐）", systemImage: "terminal.fill")
+                    Label(tr("方法一：官方标准安装脚本（推荐）", "方法一：官方標準安裝腳本（推薦）", "Option 1: Official Install Script (Recommended)"), systemImage: "terminal.fill")
                         .font(.callout.weight(.semibold))
                     Spacer()
                     if store.copiedInstallCommand {
-                        Label("已复制到剪贴板", systemImage: "checkmark.circle.fill")
+                        Label(tr("已复制到剪贴板", "已複製到剪貼簿", "Copied to Clipboard"), systemImage: "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundStyle(.green)
                     }
@@ -317,21 +503,21 @@ public struct BrewMissingGuideView: View {
                         NSPasteboard.general.setString(Self.officialInstallCommand, forType: .string)
                         store.copiedInstallCommand = true
                     } label: {
-                        Label("复制安装命令", systemImage: "doc.on.doc")
+                        Label(tr("复制安装命令", "複製安裝命令", "Copy Command"), systemImage: "doc.on.doc")
                     }
                     .buttonStyle(.bordered)
 
                     Button {
                         Self.launchInstallInTerminal()
                     } label: {
-                        Label("在「终端 (Terminal)」中打开并安装", systemImage: "play.fill")
+                        Label(tr("在「终端 (Terminal)」中打开并安装", "在「終端機 (Terminal)」中打開並安裝", "Open & Install in Terminal.app"), systemImage: "play.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.orange)
 
-                    if let url = URL(string: "https://brew.sh/zh-cn/") {
+                    if let url = URL(string: tr("https://brew.sh/zh-cn/", "https://brew.sh/zh-tw/", "https://brew.sh/")) {
                         Link(destination: url) {
-                            Label("访问 Homebrew 官网", systemImage: "safari")
+                            Label(tr("访问 Homebrew 官网", "造訪 Homebrew 官網", "Visit brew.sh"), systemImage: "safari")
                         }
                         .font(.callout)
                     }
@@ -346,7 +532,7 @@ public struct BrewMissingGuideView: View {
                 Button {
                     store.recheckBrewInstallation()
                 } label: {
-                    Label("我已完成安装，重新检测 Homebrew", systemImage: "arrow.clockwise.circle.fill")
+                    Label(tr("我已完成安装，重新检测 Homebrew", "我已完成安裝，重新偵測 Homebrew", "I've Installed Homebrew — Recheck"), systemImage: "arrow.clockwise.circle.fill")
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                 }
@@ -365,10 +551,10 @@ public struct BrewMissingGuideView: View {
         let scriptContent = """
         #!/bin/zsh
         clear
-        echo "==> 正在为您启动 Homebrew 官方安装向导..."
+        echo "==> 正在为您启动 Homebrew 官方安装向导 / Launching Homebrew official installer..."
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         echo ""
-        echo "==> 安装流程已结束，您现在可以返回 BrewGUI 点击「我已完成安装，重新检测 Homebrew」。"
+        echo "==> 安装流程已结束，您现在可以返回 BrewGUI 点击重新检测。"
         exec zsh
         """
         do {
@@ -403,30 +589,79 @@ public struct MenuBarPanelView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if !store.isBrewInstalled {
-                    BadgeView(text: "未安装 Brew", color: .red)
+                    BadgeView(text: tr("未安装 Brew", "未安裝 Brew", "No Brew"), color: .red)
                 } else if store.outdatedCount > 0 {
-                    BadgeView(text: "\(store.outdatedCount) 个可更新", color: .orange)
+                    BadgeView(text: tr("\(store.outdatedCount) 个可更新", "\(store.outdatedCount) 個可更新", "\(store.outdatedCount) Outdated"), color: .orange)
                 } else {
-                    BadgeView(text: "全部最新", color: .green)
+                    BadgeView(text: tr("全部最新", "全部最新", "Up to Date"), color: .green)
                 }
+            }
+
+            // Self-Update Banner inside MenuBar Panel
+            switch store.selfUpdateState {
+            case .updateAvailable(let remote):
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.orange)
+                    Text("\(tr("发现新版", "發現新版", "New Release")) v\(remote.version)")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button(tr("立即更新", "立即更新", "Update Now")) {
+                        store.performAppSelfUpdate(remote)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .controlSize(.mini)
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            case .downloading(let remote, let prog):
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("\(tr("正在下载", "正在下載", "Downloading")) BrewGUI v\(remote.version)…")
+                            .font(.caption2)
+                        Spacer()
+                        Text("\(Int(prog * 100))%")
+                            .font(.caption2.monospaced())
+                    }
+                    ProgressView(value: prog)
+                        .controlSize(.mini)
+                }
+                .padding(8)
+                .background(Color.accentColor.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            case .verifyingAndInstalling:
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(tr("正在校验并安装更新…", "正在校驗並安裝更新…", "Verifying & installing update…"))
+                        .font(.caption2)
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            default:
+                EmptyView()
             }
 
             Divider()
 
             if !store.isBrewInstalled {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("未检测到 Homebrew (`/opt/homebrew/bin/brew`)。")
+                    Text(tr("未检测到 Homebrew (`/opt/homebrew/bin/brew`)。", "未偵測到 Homebrew (`/opt/homebrew/bin/brew`)。", "Homebrew (`/opt/homebrew/bin/brew`) not found."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        Button("在终端中安装") {
+                        Button(tr("在终端中安装", "在終端機中安裝", "Install in Terminal")) {
                             BrewMissingGuideView.launchInstallInTerminal()
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
                         .controlSize(.small)
 
-                        Button("重新检测") {
+                        Button(tr("重新检测", "重新偵測", "Recheck")) {
                             store.recheckBrewInstallation()
                         }
                         .buttonStyle(.bordered)
@@ -459,14 +694,14 @@ public struct MenuBarPanelView: View {
                             }
                             Spacer()
                             if !store.taskQueue.isEmpty {
-                                Button("跳过") {
+                                Button(tr("跳过", "略過", "Skip")) {
                                     store.skipCurrentTask()
                                 }
                                 .buttonStyle(.bordered)
                                 .tint(.orange)
                                 .controlSize(.mini)
                             }
-                            Button("停止", role: .destructive) {
+                            Button(tr("停止", "停止", "Stop"), role: .destructive) {
                                 store.stopAllTasks()
                             }
                             .buttonStyle(.borderedProminent)
@@ -486,10 +721,10 @@ public struct MenuBarPanelView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.caption)
-                        Text("有 \(store.lastFailedOrSkippedTasks.count) 个未完成任务")
+                        Text(tr("有 \(store.lastFailedOrSkippedTasks.count) 个未完成任务", "有 \(store.lastFailedOrSkippedTasks.count) 個未完成任務", "\(store.lastFailedOrSkippedTasks.count) incomplete tasks"))
                             .font(.caption)
                         Spacer()
-                        Button("重试") {
+                        Button(tr("重试", "重試", "Retry")) {
                             store.retryFailedOrSkippedTasks()
                         }
                         .buttonStyle(.borderedProminent)
@@ -506,13 +741,13 @@ public struct MenuBarPanelView: View {
                     HStack {
                         Image(systemName: "checkmark.circle")
                             .foregroundStyle(.green)
-                        Text("当前没有待升级的软件包")
+                        Text(tr("当前没有待升级的软件包", "目前沒有待升級的軟體套件", "All packages are up to date"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
                 } else {
-                    Text("待升级软件包 (\(store.outdatedCount))")
+                    Text(tr("待升级软件包 (\(store.outdatedCount))", "待升級軟體套件 (\(store.outdatedCount))", "Outdated Packages (\(store.outdatedCount))"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
@@ -532,7 +767,7 @@ public struct MenuBarPanelView: View {
                                             }
                                         }
                                         if pkg.hasBundleVersionMismatch && !pkg.isOutdated {
-                                            Text("实际 \(pkg.actualBundleVersion ?? "?") → 账面 \(pkg.latestVersion)")
+                                            Text("\(tr("实际", "實際", "Disk")) \(pkg.actualBundleVersion ?? "?") → \(tr("账面", "帳面", "Brew")) \(pkg.latestVersion)")
                                                 .font(.caption2.monospaced())
                                                 .foregroundStyle(.orange)
                                         } else {
@@ -542,7 +777,7 @@ public struct MenuBarPanelView: View {
                                         }
                                     }
                                     Spacer()
-                                    Button(pkg.hasBundleVersionMismatch && !pkg.isOutdated ? "覆盖升级" : "升级") {
+                                    Button(pkg.hasBundleVersionMismatch && !pkg.isOutdated ? tr("覆盖升级", "覆蓋升級", "Sync") : tr("升级", "升級", "Upgrade")) {
                                         store.upgradePackage(pkg)
                                     }
                                     .buttonStyle(.borderedProminent)
@@ -564,7 +799,7 @@ public struct MenuBarPanelView: View {
                     Button {
                         store.checkUpdates()
                     } label: {
-                        Label("检查更新", systemImage: "icloud.and.arrow.down")
+                        Label(tr("检查更新", "檢查更新", "Check Updates"), systemImage: "icloud.and.arrow.down")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -573,7 +808,7 @@ public struct MenuBarPanelView: View {
                     Button {
                         store.upgradeAll()
                     } label: {
-                        Label("全部升级", systemImage: "arrow.up.circle.fill")
+                        Label(tr("全部升级", "全部升級", "Upgrade All"), systemImage: "arrow.up.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -583,10 +818,10 @@ public struct MenuBarPanelView: View {
 
             Divider()
 
-            // MenuBar Lightweight Settings (Silent Launch at Login & Auto Check Updates)
+            // MenuBar Lightweight Settings (Silent Launch at Login, Auto Check Updates, Language, Self-Update)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Toggle("开机静默启动 (仅驻留菜单栏)", isOn: $store.launchAtLoginSilent)
+                    Toggle(tr("开机静默启动 (仅驻留菜单栏)", "開機靜默啟動 (僅駐留選單列)", "Silent Launch at Login (MenuBar only)"), isOn: $store.launchAtLoginSilent)
                         .toggleStyle(.switch)
                         .controlSize(.mini)
                         .font(.caption)
@@ -594,11 +829,11 @@ public struct MenuBarPanelView: View {
                 }
 
                 HStack(spacing: 6) {
-                    Text("自动检查更新:")
+                    Text(tr("自动检查更新:", "自動檢查更新:", "Auto Check:"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Picker("自动检查更新", selection: $store.autoUpdateInterval) {
+                    Picker(tr("自动检查更新", "自動檢查更新", "Auto Check"), selection: $store.autoUpdateInterval) {
                         ForEach(AutoUpdateInterval.allCases) { interval in
                             Text(interval.label).tag(interval)
                         }
@@ -607,6 +842,35 @@ public struct MenuBarPanelView: View {
                     .labelsHidden()
                     .controlSize(.mini)
                     .fixedSize()
+                }
+
+                HStack(spacing: 6) {
+                    Text(tr("界面语言:", "介面語言:", "Language:"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Picker(tr("界面语言", "介面語言", "Language"), selection: $store.appLanguage) {
+                        ForEach(AppLanguage.allCases) { lang in
+                            Text(lang.displayName).tag(lang)
+                        }
+                    }
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .fixedSize()
+
+                    Button {
+                        Task { await store.checkForAppUpdate(userInitiated: true) }
+                    } label: {
+                        if store.selfUpdateState == .checking {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Label(tr("客户端自更新", "客戶端自更新", "App Update"), systemImage: "arrow.triangle.2.circlepath")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
                 }
             }
             .padding(.vertical, 2)
@@ -621,7 +885,7 @@ public struct MenuBarPanelView: View {
                         WindowPolicyManager.shared.activateAndShowMainWindow()
                     }
                 } label: {
-                    Label("打开主窗口", systemImage: "macwindow")
+                    Label(tr("打开主窗口", "打開主視窗", "Open Main Window"), systemImage: "macwindow")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -630,7 +894,7 @@ public struct MenuBarPanelView: View {
                 Button(role: .destructive) {
                     NSApplication.shared.terminate(nil)
                 } label: {
-                    Label("退出", systemImage: "power")
+                    Label(tr("退出", "結束", "Quit"), systemImage: "power")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -677,7 +941,7 @@ public final class StatusBarController: NSObject, NSApplicationDelegate {
             button.target = self
             button.action = #selector(handleStatusBarClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.toolTip = "左键：打开主窗口 | 右键：打开快捷菜单栏面板"
+            button.toolTip = tr("左键：打开主窗口 | 右键：打开快捷菜单栏面板", "左鍵：打開主視窗 | 右鍵：打開快捷選單列面板", "Left-click: Open Main Window | Right-click: Quick MenuBar Panel")
         }
 
         let hostingController = NSHostingController(
@@ -691,7 +955,7 @@ public final class StatusBarController: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
 
-        // Observe outdatedCount changes to update status bar badge text and resize popover smoothly
+        // Observe outdatedCount, language, and selfUpdateState changes to update status bar badge text and resize popover smoothly
         BrewStore.shared.$installedPackages
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -700,6 +964,21 @@ public final class StatusBarController: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         BrewStore.shared.$currentTask
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateStatusItemBadge()
+            }
+            .store(in: &cancellables)
+
+        BrewStore.shared.$appLanguage
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.statusItem?.button?.toolTip = tr("左键：打开主窗口 | 右键：打开快捷菜单栏面板", "左鍵：打開主視窗 | 右鍵：打開快捷選單列面板", "Left-click: Open Main Window | Right-click: Quick MenuBar Panel")
+                self?.updateStatusItemBadge()
+            }
+            .store(in: &cancellables)
+
+        BrewStore.shared.$selfUpdateState
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateStatusItemBadge()
@@ -760,7 +1039,7 @@ public final class StatusBarController: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "BrewGUI v\(AppConstants.versionString) — Homebrew 管理器"
+        window.title = "BrewGUI v\(AppConstants.versionString) — \(tr("Homebrew 管理器", "Homebrew 管理器", "Homebrew Manager"))"
         window.center()
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: MainWindowView(store: BrewStore.shared))

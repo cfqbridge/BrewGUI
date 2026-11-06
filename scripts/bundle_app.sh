@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-APP_VERSION="${APP_VERSION:-1.5.261105}"
+APP_VERSION="${APP_VERSION:-1.6.261106}"
 
 echo "==> 1. Compiling BrewGUI v$APP_VERSION (Release, arm64)..."
 swift build -c release --arch arm64
@@ -66,7 +66,13 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
     <key>CFBundleShortVersionString</key>
     <string>${APP_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>261105</string>
+    <string>261106</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>zh_CN</string>
+        <string>zh_TW</string>
+        <string>en</string>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

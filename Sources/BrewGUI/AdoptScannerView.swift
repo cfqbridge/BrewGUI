@@ -36,11 +36,17 @@ public struct BatchInstallView: View {
             // Top Header
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("批量识别与安装 (Batch Install)")
+                    Text(tr("批量识别与安装 (Batch Install)", "批次識別與安裝 (Batch Install)", "Batch Identify & Install"))
                         .font(.headline)
-                    Text("一次性粘贴多个包名（支持换行、空格、逗号分隔，甚至可直接粘贴 `brew install xxx yyy` 命令），自动识别 Formula / Cask / 本机可接管 / 已安装状态。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(
+                        tr(
+                            "一次性粘贴多个包名（支持换行、空格、逗号分隔，甚至可直接粘贴 `brew install xxx yyy` 命令），自动识别 Formula / Cask / 本机可接管 / 已安装状态。",
+                            "一次性貼上多個套件名（支援換行、空白、逗號分隔，甚至可直接貼上 `brew install xxx yyy` 命令），自動識別 Formula / Cask / 本機可接管 / 已安裝狀態。",
+                            "Paste multiple package names (separated by spaces, newlines, or commas, or even full `brew install ...` commands) to automatically detect Formula / Cask / Adoptable / Installed status."
+                        )
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -52,9 +58,9 @@ public struct BatchInstallView: View {
                         NSPasteboard.general.setString(cmd, forType: .string)
                         store.batchInputText = cmd
                         store.parseBatchInput()
-                        store.batchExportCopiedMessage = "已导出并复制分行指令"
+                        store.batchExportCopiedMessage = tr("已导出并复制分行指令", "已匯出並複製分行指令", "Exported & copied 2-line commands")
                     } label: {
-                        Label("导出分行命令 (Formula 与 Cask 分两行)", systemImage: "text.alignleft")
+                        Label(tr("导出分行命令 (Formula 与 Cask 分两行)", "匯出分行命令 (Formula 與 Cask 分兩行)", "Export 2-line Commands (Formulae & Casks separated)"), systemImage: "text.alignleft")
                     }
 
                     Button {
@@ -63,16 +69,16 @@ public struct BatchInstallView: View {
                         NSPasteboard.general.setString(cmd, forType: .string)
                         store.batchInputText = cmd
                         store.parseBatchInput()
-                        store.batchExportCopiedMessage = "已导出并复制单行指令"
+                        store.batchExportCopiedMessage = tr("已导出并复制单行指令", "已匯出並複製單行指令", "Exported & copied 1-line command")
                     } label: {
-                        Label("导出单行合并命令", systemImage: "line.3.horizontal")
+                        Label(tr("导出单行合并命令", "匯出單行合併命令", "Export Single-Line Command"), systemImage: "line.3.horizontal")
                     }
                 } label: {
-                    Label("导出本机安装指令", systemImage: "square.and.arrow.up")
+                    Label(tr("导出本机安装指令", "匯出本機安裝指令", "Export Installed List"), systemImage: "square.and.arrow.up")
                 }
                 .menuStyle(.borderedButton)
                 .fixedSize()
-                .help("将本机所有已托管顶层应用导出为 brew install 命令并复制到剪贴板，方便重装系统或换新机迁移")
+                .help(tr("将本机所有已托管顶层应用导出为 brew install 命令并复制到剪贴板，方便重装系统或换新机迁移", "將本機所有已託管頂層應用匯出為 brew install 命令並複製到剪貼簿，方便重灌系統或換新機遷移", "Export all top-level installed Formulae and Casks as `brew install` commands to clipboard"))
 
                 Button {
                     if let str = NSPasteboard.general.string(forType: .string) {
@@ -81,21 +87,28 @@ public struct BatchInstallView: View {
                         store.parseBatchInput()
                     }
                 } label: {
-                    Label("从剪贴板粘贴并识别", systemImage: "doc.on.clipboard")
+                    Label(tr("从剪贴板粘贴并识别", "從剪貼簿貼上並識別", "Paste & Parse"), systemImage: "doc.on.clipboard")
                 }
                 .buttonStyle(.bordered)
 
                 Button {
                     store.parseBatchInput()
                 } label: {
-                    Label("识别包名", systemImage: "text.magnifyingglass")
+                    Label(tr("识别包名", "識別套件名", "Parse"), systemImage: "text.magnifyingglass")
                 }
                 .buttonStyle(.bordered)
 
                 Button {
                     store.executeSelectedBatchInstall()
                 } label: {
-                    Label("一键排队安装 (\(selectedInstallableCount))", systemImage: "arrow.down.circle.fill")
+                    Label(
+                        tr(
+                            "一键排队安装 (\(selectedInstallableCount))",
+                            "一鍵排隊安裝 (\(selectedInstallableCount))",
+                            "Queue Install (\(selectedInstallableCount))"
+                        ),
+                        systemImage: "arrow.down.circle.fill"
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(selectedInstallableCount == 0)
@@ -111,15 +124,15 @@ public struct BatchInstallView: View {
                 // Left Input Box
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("输入或粘贴包名列表")
+                        Text(tr("输入或粘贴包名列表", "輸入或貼上套件名清單", "Input or Paste Package Names"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         if let msg = store.batchExportCopiedMessage {
-                            BadgeView(text: "\(msg) (已复制)", color: .green)
+                            BadgeView(text: msg, color: .green)
                         }
                         Spacer()
                         if !store.batchInputText.isEmpty {
-                            Button("清空输入") {
+                            Button(tr("清空输入", "清空輸入", "Clear")) {
                                 store.batchInputText = ""
                                 store.batchExportCopiedMessage = nil
                                 store.batchItems = []
@@ -143,7 +156,7 @@ public struct BatchInstallView: View {
                             store.parseBatchInput()
                         }
 
-                    Text("示例：`wget jq ripgrep visual-studio-code iina`")
+                    Text(tr("示例：`wget jq ripgrep visual-studio-code iina`", "範例：`wget jq ripgrep visual-studio-code iina`", "Example: `wget jq ripgrep visual-studio-code iina`"))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -153,13 +166,23 @@ public struct BatchInstallView: View {
                 // Right Parsed Results
                 VStack(spacing: 0) {
                     HStack(spacing: 10) {
-                        Text("识别结果 (\(store.batchItems.count) 项，已勾选 \(selectedInstallableCount) 项)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .fixedSize()
+                        Text(
+                            tr(
+                                "识别结果 (\(store.batchItems.count) 项，已勾选 \(selectedInstallableCount) 项)",
+                                "識別結果 (\(store.batchItems.count) 項，已勾選 \(selectedInstallableCount) 項)",
+                                "Parsed (\(store.batchItems.count) items, \(selectedInstallableCount) selected)"
+                            )
+                        )
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
                         if selectedKnownTotalBytes > 0 {
                             BadgeView(
-                                text: "已知下载量 ≈ \(AppConstants.formatBytes(selectedKnownTotalBytes))",
+                                text: tr(
+                                    "已知下载量 ≈ \(AppConstants.formatBytes(selectedKnownTotalBytes))",
+                                    "已知下載量 ≈ \(AppConstants.formatBytes(selectedKnownTotalBytes))",
+                                    "Est. Download ≈ \(AppConstants.formatBytes(selectedKnownTotalBytes))"
+                                ),
                                 color: selectedKnownTotalBytes > 500 * 1024 * 1024 ? .orange : .teal
                             )
                             .fixedSize()
@@ -170,18 +193,18 @@ public struct BatchInstallView: View {
                         }
                         Spacer()
                         if !store.batchItems.isEmpty {
-                            Button("仅勾选轻量包 (<100MB)") {
+                            Button(tr("仅勾选轻量包 (<100MB)", "僅勾選輕量套件 (<100MB)", "Select Lightweight Only (<100MB)")) {
                                 store.selectOnlyLightweightBatchItems(maxBytes: 100 * 1024 * 1024)
                             }
                             .buttonStyle(.plain)
                             .font(.caption)
                             .foregroundStyle(.orange)
-                            .help("取消勾选大于 100MB 的大体积安装包，先快速安装轻量软件")
+                            .help(tr("取消勾选大于 100MB 的大体积安装包，先快速安装轻量软件", "取消勾選大於 100MB 的大體積安裝包，先快速安裝輕量軟體", "Uncheck installers larger than 100MB to install lightweight packages first"))
 
                             Text("·")
                                 .foregroundStyle(.tertiary)
 
-                            Button("全选可安装项") {
+                            Button(tr("全选可安装项", "全選可安裝項", "Select All Installable")) {
                                 for idx in store.batchItems.indices {
                                     switch store.batchItems[idx].status {
                                     case .readyToInstall, .readyToAdopt:
@@ -207,12 +230,18 @@ public struct BatchInstallView: View {
                             Image(systemName: "list.bullet.clipboard")
                                 .font(.system(size: 36))
                                 .foregroundStyle(.secondary)
-                            Text("在左侧粘贴包名后将自动在此处展示识别结果")
+                            Text(tr("在左侧粘贴包名后将自动在此处展示识别结果", "在左側貼上套件名後將自動在此處展示識別結果", "Paste package names on the left to preview parsed results here"))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
-                            Text("执行时将自动把 Formula 合并为单条命令统一解析依赖，并将 Cask 逐个排队以便单包跳过与立即可用。")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                            Text(
+                                tr(
+                                    "执行时将自动把 Formula 合并为单条命令统一解析依赖，并将 Cask 逐个排队以便单包跳过与立即可用。",
+                                    "執行時將自動把 Formula 合併為單條命令統一解析依賴，並將 Cask 逐個排隊以便單套件略過與立即可用。",
+                                    "Formulae are merged into a single command for shared dependency resolution, while Casks are queued individually."
+                                )
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -277,7 +306,7 @@ private struct BatchItemRow: View {
                                 .foregroundStyle(.secondary)
                         }
                         BadgeView(text: entry.type.rawValue, color: entry.type == .cask ? .purple : .blue)
-                        BadgeView(text: "可安装 \(entry.version)", color: .blue)
+                        BadgeView(text: "\(tr("可安装", "可安裝", "Ready")) \(entry.version)", color: .blue)
                         if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
                             let isLarge = sizeBytes >= 100 * 1024 * 1024
                             BadgeView(
@@ -312,7 +341,7 @@ private struct BatchItemRow: View {
                             .fixedSize(horizontal: true, vertical: false)
                         BadgeView(text: "Cask", color: .purple)
                             .fixedSize()
-                        BadgeView(text: "检测到本地 \(localApp)", color: .teal)
+                        BadgeView(text: "\(tr("检测到本地", "偵測到本機", "Local found:")) \(localApp)", color: .teal)
                             .fixedSize()
                         if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
                             BadgeView(
@@ -335,7 +364,7 @@ private struct BatchItemRow: View {
                 Button {
                     onToggleAdoptMode()
                 } label: {
-                    Text(item.useAdoptIfAvailable ? "模式: Adopt 接管" : "模式: 全新安装")
+                    Text(item.useAdoptIfAvailable ? tr("模式: Adopt 接管", "模式: Adopt 接管", "Mode: Adopt") : tr("模式: 全新安装", "模式: 全新安裝", "Mode: Fresh Install"))
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -354,7 +383,10 @@ private struct BatchItemRow: View {
                             .font(.body.weight(.medium))
                             .foregroundStyle(.secondary)
                         BadgeView(text: pkg.type.rawValue, color: .gray)
-                        BadgeView(text: "已安装 (\(pkg.installedVersion ?? ""))，自动跳过", color: .green)
+                        BadgeView(
+                            text: tr("已安装 (\(pkg.installedVersion ?? ""))，自动跳过", "已安裝 (\(pkg.installedVersion ?? ""))，自動略過", "Installed (\(pkg.installedVersion ?? "")), skipped"),
+                            color: .green
+                        )
                     }
                 }
 
@@ -366,7 +398,7 @@ private struct BatchItemRow: View {
                 HStack(spacing: 6) {
                     Text(item.rawToken)
                         .font(.body.monospaced().weight(.medium))
-                    BadgeView(text: "未找到匹配的 Formula 或 Cask", color: .orange)
+                    BadgeView(text: tr("未找到匹配的 Formula 或 Cask", "找不到符合的 Formula 或 Cask", "No matching Formula or Cask found"), color: .orange)
                 }
             }
 
