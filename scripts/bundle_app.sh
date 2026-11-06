@@ -4,12 +4,12 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-APP_VERSION="1.5.261105"
+APP_VERSION="${APP_VERSION:-1.5.261105}"
 
 echo "==> 1. Compiling BrewGUI v$APP_VERSION (Release, arm64)..."
-swift build -c release
+swift build -c release --arch arm64
 
-BIN_PATH="$(swift build -c release --show-bin-path)/BrewGUI"
+BIN_PATH="$(swift build -c release --arch arm64 --show-bin-path)/BrewGUI"
 APP_BUNDLE="$PROJECT_DIR/dist/BrewGUI.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
@@ -135,6 +135,7 @@ if [[ -f "$MOUNT_DIR/.VolumeIcon.icns" && -x "/usr/bin/SetFile" ]]; then
     /usr/bin/SetFile -a C "$MOUNT_DIR" || true
 fi
 
+if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
 /usr/bin/osascript <<EOF || echo "Warning: Finder AppleScript layout skipped (sandbox or headless environment)."
 tell application "Finder"
     tell disk "$DMG_VOL_NAME"
@@ -158,6 +159,7 @@ tell application "Finder"
     end tell
 end tell
 EOF
+fi
 
 /bin/chmod -Rf go-w "$MOUNT_DIR" 2>/dev/null || true
 /bin/sync

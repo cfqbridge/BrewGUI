@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-and-package:
-    runs-on: macos-14 # Apple Silicon arm64 runner
+    runs-on: macos-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -28,14 +28,16 @@ jobs:
             VERSION="${TAG_NAME#v}"
           else
             VERSION="${{ github.event.inputs.version || '1.5.261105' }}"
+            VERSION="${VERSION#v}"
+            TAG_NAME="v${VERSION}"
           fi
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Packaging BrewGUI v$VERSION"
+          echo "RELEASE_TAG=$TAG_NAME" >> $GITHUB_ENV
+          echo "Packaging BrewGUI v$VERSION (tag: $TAG_NAME)"
 
       - name: Build and Package App Bundle & DMG
         run: |
           chmod +x scripts/bundle_app.sh
-          # 运行官方打包脚本（无屏幕环境下会自动跳过 Finder 动画布局并生成优化压缩 DMG）
           ./scripts/bundle_app.sh
 
       - name: Generate Checksums & version.json for Auto-Update
@@ -45,7 +47,6 @@ jobs:
           echo "SHA256: $SHA256"
           echo "BREWGUI_SHA256=$SHA256" >> $GITHUB_ENV
           
-          # 生成供客户端自更新静默检测的结构化元数据
           cat > version.json <<EOF
           {
             "version": "${{ env.APP_VERSION }}",
@@ -59,9 +60,8 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ github.ref_name || format('v{0}', env.APP_VERSION) }}
+          tag_name: ${{ env.RELEASE_TAG }}
           name: BrewGUI v${{ env.APP_VERSION }} (Public Beta)
           draft: false
           prerelease: false
