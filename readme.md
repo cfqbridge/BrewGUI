@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <b>简体中文</b> · <a href="README_EN.md">English</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v1.6.261106-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
@@ -106,6 +110,8 @@ open dist/BrewGUI.app
 
 ```text
 ├── Package.swift               # SPM 项目定义
+├── readme.md                   # 中文项目文档（默认）
+├── README_EN.md                # 英文项目文档 (English Documentation)
 ├── Sources/
 │   ├── App/                    # 应用入口、菜单栏控制器与窗口策略
 │   ├── Models/                 # 数据结构定义 (Entry, Task, CacheItem 等)
@@ -117,7 +123,8 @@ open dist/BrewGUI.app
 └── ref/
     ├── DESIGN_SUMMARY.md       # 视觉选型与设计归档说明
     ├── icon_option_c.png       # 应用高清原生图标源文件
-    └── dmg_bg_option_c.png     # DMG 视网膜安装背景图
+    ├── dmg_bg_option_c.png     # DMG 视网膜安装背景图
+    └── dmg_DS_Store            # DMG 窗口布局与背景绑定模板 (供 GitHub Actions 使用)
 ```
 
 ---

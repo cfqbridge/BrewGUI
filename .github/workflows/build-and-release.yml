@@ -62,7 +62,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: BrewGUI v${{ env.APP_VERSION }} (Public Beta)
+          name: BrewGUI v${{ env.APP_VERSION }}
           draft: false
           prerelease: false
           generate_release_notes: true

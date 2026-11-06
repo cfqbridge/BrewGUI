@@ -16,7 +16,6 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 echo "==> 2. Assembling $APP_BUNDLE..."
-/usr/bin/killall BrewGUI 2>/dev/null || true
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
@@ -130,6 +129,11 @@ if [[ -f "$RESOURCES_DIR/AppIcon.icns" ]]; then
     cp "$RESOURCES_DIR/AppIcon.icns" "$DMG_STAGING/.VolumeIcon.icns"
 fi
 
+DS_STORE_TEMPLATE="$PROJECT_DIR/ref/dmg_DS_Store"
+if [[ -f "$DS_STORE_TEMPLATE" ]]; then
+    cp -f "$DS_STORE_TEMPLATE" "$DMG_STAGING/.DS_Store"
+fi
+
 /usr/bin/hdiutil create -srcfolder "$DMG_STAGING" -volname "$DMG_VOL_NAME" -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" -format UDRW -ov "$DMG_TEMP" >/dev/null
 
@@ -165,6 +169,13 @@ tell application "Finder"
     end tell
 end tell
 EOF
+    if [[ -f "$MOUNT_DIR/.DS_Store" ]]; then
+        cp -f "$MOUNT_DIR/.DS_Store" "$DS_STORE_TEMPLATE"
+        echo "==> Updated DMG layout template: $DS_STORE_TEMPLATE"
+    fi
+elif [[ -f "$DS_STORE_TEMPLATE" ]]; then
+    cp -f "$DS_STORE_TEMPLATE" "$MOUNT_DIR/.DS_Store"
+    echo "==> Applied pre-built DMG layout template: $DS_STORE_TEMPLATE"
 fi
 
 /bin/chmod -Rf go-w "$MOUNT_DIR" 2>/dev/null || true

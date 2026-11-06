@@ -2,7 +2,12 @@ import Foundation
 
 public enum AppConstants {
     /// 版本格式: 版本号.修订号(用法兼容的修订).日期号(YYMMDD)
-    public static let versionString = "1.6.261106"
+    public static let versionString: String = {
+        if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
+            return shortVer
+        }
+        return "1.6.261106"
+    }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
 
