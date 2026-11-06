@@ -1,0 +1,71 @@
+name: Build & Release BrewGUI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.5.261105)'
+        required: false
+        default: '1.5.261105'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-package:
+    runs-on: macos-14 # Apple Silicon arm64 runner
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Version Environment
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            VERSION="${TAG_NAME#v}"
+          else
+            VERSION="${{ github.event.inputs.version || '1.5.261105' }}"
+          fi
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Packaging BrewGUI v$VERSION"
+
+      - name: Build and Package App Bundle & DMG
+        run: |
+          chmod +x scripts/bundle_app.sh
+          # 运行官方打包脚本（无屏幕环境下会自动跳过 Finder 动画布局并生成优化压缩 DMG）
+          ./scripts/bundle_app.sh
+
+      - name: Generate Checksums & version.json for Auto-Update
+        run: |
+          cd dist
+          SHA256=$(shasum -a 256 BrewGUI.dmg | awk '{print $1}')
+          echo "SHA256: $SHA256"
+          echo "BREWGUI_SHA256=$SHA256" >> $GITHUB_ENV
+          
+          # 生成供客户端自更新静默检测的结构化元数据
+          cat > version.json <<EOF
+          {
+            "version": "${{ env.APP_VERSION }}",
+            "release_date": "$(date +%Y-%m-%d)",
+            "download_url": "https://github.com/cfqbridge/BrewGUI/releases/latest/download/BrewGUI.dmg",
+            "sha256": "$SHA256",
+            "release_page": "https://github.com/cfqbridge/BrewGUI/releases"
+          }
+          EOF
+          cat version.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', env.APP_VERSION) }}
+          name: BrewGUI v${{ env.APP_VERSION }} (Public Beta)
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/BrewGUI.dmg
+            dist/version.json

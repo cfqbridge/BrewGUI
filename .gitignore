@@ -1,0 +1,37 @@
+# ==========================================
+# BrewGUI .gitignore
+# ==========================================
+
+# Swift Package Manager & 构建产物
+.build/
+dist/
+*.app
+*.dmg
+.swiftpm/
+Package.resolved
+
+# 系统临时文件与元数据
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 本机与项目运行日志及内部 Agent 规范（脱敏防护，仅本地保留）
+events.jsonl
+agents.md
+AGENTS.md
+*.log
+Logs/
+brewgui.log
+
+# 本地静态产品落地页（用户本地独立维护与部署，不纳入仓库）
+site/
+
+# 本地用户配置与状态缓存
+ignored_adopt.json
+*.user
+*.xcuserstate
+*.xcuserdata/
