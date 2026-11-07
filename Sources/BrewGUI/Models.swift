@@ -578,13 +578,13 @@ public enum MaintenanceSubTab: String, CaseIterable, Identifiable, Sendable {
     public var localizedLabel: String {
         switch self {
         case .cacheAndOrphans:
-            return tr("📦 缓存与孤儿依赖", "📦 快取與孤兒依賴", "📦 Caches & Orphans")
+            return tr("缓存与依赖", "快取與依賴", "Caches & Orphans")
         case .appLeftovers:
-            return tr("🧹 卸载残留", "🧹 殘留清理", "🧹 Leftovers")
+            return tr("卸载残留", "殘留清理", "Leftovers")
         case .services:
-            return tr("⚙️ 后台服务", "⚙️ 背景服務", "⚙️ Services")
+            return tr("后台服务", "背景服務", "Services")
         case .doctorAndTaps:
-            return tr("🩺 体检与 Tap", "🩺 體檢與 Tap", "🩺 Doctor & Taps")
+            return tr("体检与 Tap", "體檢與 Tap", "Doctor & Taps")
         }
     }
 }

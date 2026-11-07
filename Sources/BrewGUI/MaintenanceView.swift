@@ -32,7 +32,6 @@ public struct MaintenanceView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
                 }
 
                 Spacer()
@@ -98,9 +97,9 @@ public struct MaintenanceView: View {
                             .foregroundStyle(.purple)
                         Text(
                             tr(
-                                "发现 \(store.appLeftovers.count) 项已卸载软件残留（共 \(AppConstants.formatBytes(store.totalLeftoversBytes))），点击前往深度清理 →",
-                                "發現 \(store.appLeftovers.count) 項已解除安裝軟體殘留（共 \(AppConstants.formatBytes(store.totalLeftoversBytes))），點擊前往深度清理 →",
-                                "Found \(store.appLeftovers.count) uninstalled app leftovers (\(AppConstants.formatBytes(store.totalLeftoversBytes))) — click to clean →"
+                                "发现 \(store.appLeftovers.count) 项已卸载残留（\(AppConstants.formatBytes(store.totalLeftoversBytes))），点击清理 →",
+                                "發現 \(store.appLeftovers.count) 項已解除安裝殘留（\(AppConstants.formatBytes(store.totalLeftoversBytes))），點擊清理 →",
+                                "Found \(store.appLeftovers.count) leftovers (\(AppConstants.formatBytes(store.totalLeftoversBytes))) — clean →"
                             )
                         )
                         .font(.caption.weight(.medium))
@@ -151,14 +150,14 @@ public struct MaintenanceView: View {
                 if store.totalCachedDownloadsBytes > 0 {
                     Label(
                         tr(
-                            "一键清理全部缓存 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
-                            "一鍵清理全部快取 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
-                            "Clean All Caches (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))"
+                            "一键清理缓存 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
+                            "一鍵清理快取 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
+                            "Clean Caches (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))"
                         ),
                         systemImage: "sparkles"
                     )
                 } else {
-                    Label(tr("执行 brew cleanup", "執行 brew cleanup", "Run brew cleanup"), systemImage: "sparkles")
+                    Label(tr("清理全部缓存", "清理全部快取", "Clean All Caches"), systemImage: "sparkles")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -269,14 +268,14 @@ public struct MaintenanceView: View {
                     .listStyle(.inset)
                 }
             }
-            .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
 
             // Right: Orphan Formulae (brew autoremove) & Tips
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Image(systemName: "shippingbox.and.arrow.backward.fill")
                         .foregroundStyle(.teal)
-                    Text(tr("无用孤儿依赖包 (`brew autoremove`)", "無用孤兒依賴套件 (`brew autoremove`)", "Orphan Dependencies (`brew autoremove`)"))
+                    Text(tr("无用孤儿依赖包", "無用孤兒依賴套件", "Orphan Dependencies"))
                         .font(.caption.weight(.semibold))
                     Spacer()
                     if store.isScanningOrphans {
@@ -343,9 +342,9 @@ public struct MaintenanceView: View {
                         } label: {
                             Label(
                                 tr(
-                                    "一键清理 \(store.orphanFormulae.count) 个孤儿依赖 (brew autoremove)",
-                                    "一鍵清理 \(store.orphanFormulae.count) 個孤兒依賴 (brew autoremove)",
-                                    "Remove \(store.orphanFormulae.count) Orphan Dependencies (brew autoremove)"
+                                    "一键清理 \(store.orphanFormulae.count) 个孤儿依赖",
+                                    "一鍵清理 \(store.orphanFormulae.count) 個孤兒依賴",
+                                    "Remove \(store.orphanFormulae.count) Orphan Dependencies"
                                 ),
                                 systemImage: "trash.fill"
                             )
@@ -369,9 +368,9 @@ public struct MaintenanceView: View {
                         .foregroundStyle(.teal)
                         Text(
                             tr(
-                                "• Homebrew 默认会将已安装软件的 `.dmg` / `.zip` / `.bottle.tar.gz` 安装包保留 120 天。点击右上角「一键清理全部缓存」将执行 `brew cleanup --prune=all`，安全清除所有历史安装包缓存及旧版运行库。\n• 若您过去曾直接将应用拖入废纸篓或未使用 `--zap` 卸载，可切换至上方「🧹 卸载残留深度清理」扫描遗留在 `~/Library` 下的孤儿配置与缓存目录。",
-                                "• Homebrew 預設會將已安裝軟體的 `.dmg` / `.zip` / `.bottle.tar.gz` 安裝包保留 120 天。點擊右上角「一鍵清理全部快取」將執行 `brew cleanup --prune=all`，安全清除所有歷史安裝包快取及舊版執行庫。\n• 若您過去曾直接將應用拖入垃圾桶或未使用 `--zap` 解除安裝，可切換至上方「🧹 解除安裝殘留清理」掃描遺留在 `~/Library` 下的孤兒設定與快取目錄。",
-                                "• Homebrew keeps downloaded archives for 120 days by default. Clicking \"Clean All Caches\" runs `brew cleanup --prune=all` to safely reclaim disk space.\n• Switch to \"🧹 App Leftovers (:zap)\" above to scan and clean leftover `~/Library` folders from previously uninstalled apps."
+                                "• Homebrew 默认会将已安装软件的 `.dmg` / `.zip` / `.bottle.tar.gz` 安装包保留 120 天。点击右上角「一键清理缓存」将安全清除所有历史安装包缓存及旧版运行库。\n• 若您过去曾直接将应用拖入废纸篓或未使用 `--zap` 卸载，可切换至上方「卸载残留」扫描遗留在 `~/Library` 下的孤儿配置与缓存目录。",
+                                "• Homebrew 預設會將已安裝軟體的 `.dmg` / `.zip` / `.bottle.tar.gz` 安裝包保留 120 天。點擊右上角「一鍵清理快取」將安全清除所有歷史安裝包快取及舊版執行庫。\n• 若您過去曾直接將應用拖入垃圾桶或未使用 `--zap` 解除安裝，可切換至上方「殘留清理」掃描遺留在 `~/Library` 下的孤兒設定與快取目錄。",
+                                "• Homebrew keeps downloaded archives for 120 days by default. Clicking \"Clean Caches\" safely reclaims disk space.\n• Switch to \"Leftovers\" above to scan and clean leftover `~/Library` folders from previously uninstalled apps."
                             )
                         )
                         .font(.caption2)
@@ -384,7 +383,7 @@ public struct MaintenanceView: View {
                 .padding(14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(minWidth: 280, idealWidth: 340, maxWidth: 420, maxHeight: .infinity)
+            .frame(minWidth: 240, idealWidth: 300, maxWidth: 380, maxHeight: .infinity)
         }
     }
 
@@ -571,13 +570,7 @@ public struct MaintenanceView: View {
                     .foregroundStyle(.teal)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(
-                        tr(
-                            "Homebrew 后台守护进程管理 (`brew services` · macOS `launchctl`)",
-                            "Homebrew 背景守護行程管理 (`brew services` · macOS `launchctl`)",
-                            "Homebrew Background Services Manager (`brew services` · macOS `launchctl`)"
-                        )
-                    )
+                    Text(tr("Homebrew 后台守护服务管理", "Homebrew 背景守護服務管理", "Homebrew Background Services"))
                     .font(.caption.weight(.semibold))
                     Text(
                         tr(
@@ -766,7 +759,7 @@ public struct MaintenanceView: View {
                 HStack {
                     Image(systemName: "stethoscope")
                         .foregroundStyle(.green)
-                    Text(tr("Homebrew 环境健康体检 (`brew doctor`)", "Homebrew 環境健康體檢 (`brew doctor`)", "Environment Health Check (`brew doctor`)"))
+                    Text(tr("Homebrew 环境健康体检", "Homebrew 環境健康體檢", "Environment Health Check"))
                         .font(.caption.weight(.semibold))
                     Spacer()
                     Button {
@@ -775,7 +768,7 @@ public struct MaintenanceView: View {
                         Label(
                             store.doctorState.isRunning
                                 ? tr("正在体检…", "正在體檢…", "Checking…")
-                                : tr("立即运行体检 (brew doctor)", "立即執行體檢 (brew doctor)", "Run brew doctor"),
+                                : tr("立即运行体检", "立即執行體檢", "Run Diagnostics"),
                             systemImage: "waveform.path.ecg"
                         )
                     }
@@ -814,7 +807,7 @@ public struct MaintenanceView: View {
                             Button {
                                 Task { await store.runBrewDoctor() }
                             } label: {
-                                Label(tr("开始全面体检 (brew doctor)", "開始全面體檢 (brew doctor)", "Start Health Check (brew doctor)"), systemImage: "play.fill")
+                                Label(tr("开始全面体检", "開始全面體檢", "Start Diagnostics"), systemImage: "play.fill")
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.teal)
@@ -889,7 +882,7 @@ public struct MaintenanceView: View {
                             Button {
                                 store.runCleanupAllCaches()
                             } label: {
-                                Label(tr("执行 brew cleanup", "執行 brew cleanup", "Run Cleanup"), systemImage: "wrench.and.screwdriver.fill")
+                                Label(tr("立即清理缓存", "立即清理快取", "Clean Caches"), systemImage: "wrench.and.screwdriver.fill")
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.orange)
@@ -928,14 +921,14 @@ public struct MaintenanceView: View {
                 .padding(14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
 
             // Right: Third-Party Tap Repository Manager (`brew tap`)
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .foregroundStyle(.blue)
-                    Text(tr("软件源仓库管理 (`brew tap`)", "軟體源倉庫管理 (`brew tap`)", "Tap Repositories (`brew tap`)"))
+                    Text(tr("软件源仓库管理", "軟體源倉庫管理", "Tap Repositories"))
                         .font(.caption.weight(.semibold))
                     Spacer()
                     if store.isLoadingTaps {
@@ -1041,7 +1034,7 @@ public struct MaintenanceView: View {
                 .padding(14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(minWidth: 300, idealWidth: 360, maxWidth: 440, maxHeight: .infinity)
+            .frame(minWidth: 240, idealWidth: 300, maxWidth: 380, maxHeight: .infinity)
         }
     }
 }
