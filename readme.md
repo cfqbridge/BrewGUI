@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v1.6.261106-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.0.261107-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -41,20 +41,21 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 - **开机静默常驻**：支持开机静默驻留菜单栏（主窗口关闭时自动隐藏 Dock 图标，内存占用极低）。
 - **后台自动巡检**：支持 12 小时 / 72 小时周期后台自动检查更新，新版提示红点轻量提醒，绝不打扰工作流。
 
-### 2. 🔍 智能搜索与本机应用接管 (Adopt)
-- **毫秒级全量检索**：深度整合 Formula 命令行工具与 Cask 图形应用索引。
-- **智能识别本土已装应用**：自动扫描 `/Applications`，智能识别 App Store 渠道与 iOS 包装应用。
-- **版本比对与一键升级覆盖**：当本地应用版本落后于 Cask 最新版时，支持一键 `brew reinstall --cask --force` 覆盖升级，彻底解决旧版残留与认领脱节问题。
+### 2. 🔍 中文场景搜索与本机应用智能接管 (Adopt)
+- **内置中文别名与 11 大场景分类检索**：内置 170+ 主流 Mac 软件中文名/简介词典与全量英文 `desc` 自动中文功能标签映射，支持直接输入“截图”、“解压”、“播放器”、“翻译”、“终端”毫秒级检索，并提供「🔥 装机必备」、「📸 截图/录屏」、「📦 解压/归档」、「🎬 影音播放」、「🤖 AI 工具」等一键分类筛选。
+- **本机应用接管图文避坑指南与 4 类风险识别**：自动扫描 `/Applications`，智能识别并标记 **App Store 渠道应用**、**生产力/老插件版本敏感应用**、**厂商内建更新更快的国内应用** 及 **同名撞库版本异常应用**，支持一键忽略全部不推荐项。
+- **版本比对与一键升级覆盖**：当本地应用版本落后于 Cask 最新版时，支持一键 `brew install --cask --force` 覆盖升级，彻底解决旧版残留与认领脱节问题。
 
 ### 3. 📦 已安装包管理与真实版本校验
 - **多维度版本透视**：直观展示顶层安装包 (`leaves`)、全量依赖树、版本锁定状态 (`pin/unpin`)。
 - **真实磁盘版本校验**：自动校验本地应用 `Info.plist` 真实版本与 Homebrew 账面记录，杜绝“账面已更新、磁盘仍是旧版本”。
 - **安全彻底卸载**：Cask 应用卸载支持普通卸载与 `--zap`（一键同步清理缓存与配置残留）。
 
-### 4. 🧹 清理与维护 (Cleanup & Autoremove)
-- **缓存文件深度透视**：直观展示 `~/Library/Caches/Homebrew/downloads` 缓存占用明细与单个安装包删除。
-- **孤儿依赖清理 (`autoremove`)**：自动探测并一键清除不再被任何软件依赖的冗余包。
-- **一键瘦身**：一键调用 `brew cleanup --prune=all`，瞬间释放数 GB 至数十 GB 磁盘空间。
+### 4. 🧹 四合一进阶清理与系统维护 (Cache / `:zap` Leftovers / Services / Doctor)
+- **缓存文件与孤儿依赖清理**：直观展示 `~/Library/Caches/Homebrew/downloads` 缓存占用明细、一键 `brew cleanup --prune=all` 与 `brew autoremove` 孤儿依赖清理。
+- **已卸载软件残留深度清理 (`:zap` Leftovers)**：交叉比对 Homebrew Cask `:zap` 规则与本机 `/Applications` `CFBundleIdentifier`，精准揪出早已拖入废纸篓但遗留在 `~/Library` 下的孤儿配置与缓存目录，支持一键安全移至废纸篓。
+- **后台守护服务管理 (`brew services`)**：可视化查看、启动、停止、重启 MySQL、Redis、PostgreSQL、Nginx、Ollama 等后台服务并定位 `launchd` plist。
+- **环境健康体检与 Tap 源管理 (`brew doctor` & `brew tap`)**：图形化一键运行 `brew doctor` 诊断潜在冲突，支持第三方软件源 (`user/repo`) 可视化添加与移除。
 
 ### 5. ⚡️ 批量安装与环境快速迁移
 - **自由粘贴解析**：支持直接粘贴长串包名或整段 `brew install` 脚本，实时解析状态。
@@ -76,7 +77,7 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 
 - **操作系统**: macOS 14.0 (Sonoma) 或更高版本
 - **硬件架构**: Apple Silicon (M1/M2/M3/M4 系列芯片)
-- **依赖环境**: 系统已安装 [Homebrew](https://brew.sh/)（默认路径 `/opt/homebrew`）
+- **依赖环境**: 系统已安装 [Homebrew](https://brew.sh/)（默认路径 `/opt/homebrew`；若未安装，BrewGUI v2.0 内置免终端图形化一键安装向导，支持中科大/清华国内加速源自动部署）
 
 ---
 

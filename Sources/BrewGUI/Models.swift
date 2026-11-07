@@ -6,7 +6,7 @@ public enum AppConstants {
         if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
             return shortVer
         }
-        return "1.6.261106"
+        return "2.0.261107"
     }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
@@ -57,6 +57,93 @@ public enum AutoUpdateInterval: Int, CaseIterable, Identifiable, Sendable {
         case .off: return tr("关闭", "關閉", "Off")
         case .hours12: return tr("12小时", "12小時", "12h")
         case .hours72: return tr("72小时", "72小時", "72h")
+        }
+    }
+}
+
+public enum BrewMirrorSource: String, CaseIterable, Identifiable, Sendable {
+    case auto = "auto"
+    case ustc = "ustc"
+    case tuna = "tuna"
+    case official = "official"
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .auto: return tr("自动 (智能测速)", "自動 (智慧測速)", "Auto (Smart Probe)")
+        case .ustc: return tr("中科大镜像 (USTC)", "中科大鏡像 (USTC)", "USTC Mirror (China)")
+        case .tuna: return tr("清华镜像 (TUNA)", "清華鏡像 (TUNA)", "TUNA Mirror (China)")
+        case .official: return tr("官方直连 (GitHub)", "官方直連 (GitHub)", "Official (GitHub)")
+        }
+    }
+
+    public var shortLabel: String {
+        switch self {
+        case .auto: return tr("自动", "自動", "Auto")
+        case .ustc: return "USTC"
+        case .tuna: return "TUNA"
+        case .official: return tr("官方", "官方", "Official")
+        }
+    }
+
+    public var probeURLString: String {
+        switch self {
+        case .auto, .official:
+            return "https://formulae.brew.sh/api/formula_tap_migrations.jws.json"
+        case .ustc:
+            return "https://mirrors.ustc.edu.cn/homebrew-bottles/api/formula_tap_migrations.jws.json"
+        case .tuna:
+            return "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api/formula_tap_migrations.jws.json"
+        }
+    }
+
+    public var installScriptURLString: String {
+        switch self {
+        case .ustc, .tuna:
+            return "https://mirrors.ustc.edu.cn/misc/brew-install.sh"
+        case .auto, .official:
+            return "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+        }
+    }
+
+    public var environmentVariables: [String: String] {
+        switch self {
+        case .ustc:
+            return [
+                "HOMEBREW_API_DOMAIN": "https://mirrors.ustc.edu.cn/homebrew-bottles/api",
+                "HOMEBREW_BOTTLE_DOMAIN": "https://mirrors.ustc.edu.cn/homebrew-bottles",
+                "HOMEBREW_BREW_GIT_REMOTE": "https://mirrors.ustc.edu.cn/brew.git",
+                "HOMEBREW_CORE_GIT_REMOTE": "https://mirrors.ustc.edu.cn/homebrew-core.git"
+            ]
+        case .tuna:
+            return [
+                "HOMEBREW_API_DOMAIN": "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api",
+                "HOMEBREW_BOTTLE_DOMAIN": "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles",
+                "HOMEBREW_BREW_GIT_REMOTE": "https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git",
+                "HOMEBREW_CORE_GIT_REMOTE": "https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
+            ]
+        case .auto, .official:
+            return [:]
+        }
+    }
+}
+
+public enum HomebrewInstallState: Equatable, Sendable {
+    case idle
+    case probingMirrors
+    case authorizing
+    case installing(String)
+    case configuringPath
+    case succeeded
+    case failed(String)
+
+    public var isRunning: Bool {
+        switch self {
+        case .probingMirrors, .authorizing, .installing, .configuringPath:
+            return true
+        case .idle, .succeeded, .failed:
+            return false
         }
     }
 }
@@ -138,6 +225,47 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
     }
 }
 
+public enum AdoptAdvisoryKind: Sendable, Hashable {
+    case safeToAdopt
+    case safeToAdoptAndUpgrade
+    case cautionProductionVersion
+    case suggestIgnoreAppStore
+    case suggestIgnoreIOSWrapper
+    case suggestIgnoreCaskLagging
+    case suggestIgnoreDomesticUpdater
+    case suggestIgnoreVersionCollision
+
+    public var recommendsIgnore: Bool {
+        switch self {
+        case .suggestIgnoreAppStore, .suggestIgnoreIOSWrapper, .suggestIgnoreCaskLagging, .suggestIgnoreDomesticUpdater, .suggestIgnoreVersionCollision:
+            return true
+        case .safeToAdopt, .safeToAdoptAndUpgrade, .cautionProductionVersion:
+            return false
+        }
+    }
+
+    public var badgeText: String {
+        switch self {
+        case .safeToAdopt:
+            return tr("推荐接管", "推薦接管", "Safe to Adopt")
+        case .safeToAdoptAndUpgrade:
+            return tr("推荐接管并升级", "推薦接管並升級", "Adopt & Upgrade")
+        case .cautionProductionVersion:
+            return tr("生产力/插件敏感 · 需保旧版请点忽略或仅认领", "生產力/外掛敏感 · 需保舊版請點忽略或僅認領", "Pro/Plugin App · Ignore or Adopt-Only to keep version")
+        case .suggestIgnoreAppStore:
+            return tr("建议忽略 · 商店版更新更积极", "建議忽略 · 商店版更新更積極", "Suggest Ignore · App Store channel")
+        case .suggestIgnoreIOSWrapper:
+            return tr("建议忽略 · iOS/iPad 包装应用", "建議忽略 · iOS/iPad 包裝應用", "Suggest Ignore · iOS Wrapped App")
+        case .suggestIgnoreCaskLagging:
+            return tr("建议忽略 · 本地版本已新于 Cask", "建議忽略 · 本機版本已新於 Cask", "Suggest Ignore · Local newer than Cask")
+        case .suggestIgnoreDomesticUpdater:
+            return tr("建议忽略 · 厂商内建热更新更快", "建議忽略 · 廠商內建熱更新更快", "Suggest Ignore · Built-in updater is faster")
+        case .suggestIgnoreVersionCollision:
+            return tr("⚠️ 建议忽略 · 版本跨度异常/疑似撞库", "⚠️ 建議忽略 · 版本跨度異常/疑似撞庫", "⚠️ Suggest Ignore · Possible Name Collision")
+        }
+    }
+}
+
 public struct AdoptCandidate: Identifiable, Hashable, Sendable {
     public var id: String { caskToken }
     public let appName: String       // e.g. "Visual Studio Code.app"
@@ -152,14 +280,94 @@ public struct AdoptCandidate: Identifiable, Hashable, Sendable {
     public let homepage: String
     public let isIgnored: Bool
 
+    private static let productionSensitiveTokens: Set<String> = [
+        "blender", "ogdesign-eagle", "eagle", "unity", "unity-hub", "unreal-engine",
+        "godot", "davinci-resolve", "obs", "kicad", "freecad", "openscad",
+        "ableton-live-suite", "ableton-live-standard", "ardour", "reaper",
+        "krita", "gimp", "inkscape", "scribus", "darktable", "rawtherapee",
+        "docker", "virtualbox", "utm", "vmware-fusion", "parallels"
+    ]
+
+    private static let domesticSelfUpdatingTokens: Set<String> = [
+        "neteasemusic", "youdaodict", "youdaonote", "wechat", "qq", "qqmusic",
+        "kugoumusic", "kuwomusic", "baidunetdisk", "aliyundrive", "dingtalk",
+        "feishu", "lark", "tencent-meeting", "voov-meeting", "wpsoffice",
+        "wpsoffice-cn", "bilibili", "douyin", "ximalaya", "sogouinput", "eudic",
+        "xyplorer", "snipaste", "pixpin"
+    ]
+
+    public var caskPrimaryVersion: String {
+        caskVersion.split(separator: ",").first.map(String.init) ?? caskVersion
+    }
+
     /// True if the local .app version is older than the Homebrew Cask version (meaning `--adopt` would leave the old binary on disk while marking the new version as installed)
     public var isLocalOlderThanCask: Bool {
         guard let local = localVersion, !local.isEmpty, !caskVersion.isEmpty else { return false }
-        let caskPrimary = caskVersion.split(separator: ",").first.map(String.init) ?? caskVersion
-        if local == caskPrimary || caskPrimary.hasPrefix(local + ".") {
+        let caskPrimary = caskPrimaryVersion
+        if local == caskPrimary || caskPrimary.hasPrefix(local + ".") || local.hasPrefix(caskPrimary + ".") {
             return false
         }
         return local.compare(caskPrimary, options: .numeric) == .orderedAscending
+    }
+
+    /// True if the local .app version is already newer than the Homebrew Cask version (meaning the app's built-in updater or App Store channel updates faster than Brew Cask)
+    public var isLocalNewerThanCask: Bool {
+        guard let local = localVersion, !local.isEmpty, !caskVersion.isEmpty else { return false }
+        let caskPrimary = caskPrimaryVersion
+        if local == caskPrimary || caskPrimary.hasPrefix(local + ".") || local.hasPrefix(caskPrimary + ".") {
+            return false
+        }
+        return local.compare(caskPrimary, options: .numeric) == .orderedDescending
+    }
+
+    /// True if local version and Cask version have an abnormally huge major-version discrepancy (e.g. local "1.0.0" vs Cask "741.1" due to name collision or wrapper bundle)
+    public var isSuspiciousVersionCollision: Bool {
+        guard let local = localVersion, !local.isEmpty, !caskVersion.isEmpty else { return false }
+        let localFirst = local.split(whereSeparator: { !$0.isNumber }).first.flatMap { Int($0) }
+        let caskFirst = caskPrimaryVersion.split(whereSeparator: { !$0.isNumber }).first.flatMap { Int($0) }
+        guard let lMaj = localFirst, let cMaj = caskFirst else { return false }
+        // Ignore calendar/year-style versions (e.g. 2024..2030 or 26.x) when both are calendar-like
+        if (local == "1.0" || local == "1.0.0") && cMaj >= 5 {
+            return true
+        }
+        if abs(cMaj - lMaj) >= 10 && min(lMaj, cMaj) <= 5 {
+            return true
+        }
+        return false
+    }
+
+    public var isProductionVersionSensitive: Bool {
+        Self.productionSensitiveTokens.contains(caskToken.lowercased())
+    }
+
+    public var isDomesticSelfUpdating: Bool {
+        Self.domesticSelfUpdatingTokens.contains(caskToken.lowercased())
+    }
+
+    public var advisory: AdoptAdvisoryKind {
+        if isIOSWrappedApp {
+            return .suggestIgnoreIOSWrapper
+        }
+        if isAppStoreReceiptPresent {
+            return .suggestIgnoreAppStore
+        }
+        if isSuspiciousVersionCollision {
+            return .suggestIgnoreVersionCollision
+        }
+        if isDomesticSelfUpdating {
+            return .suggestIgnoreDomesticUpdater
+        }
+        if isLocalNewerThanCask {
+            return .suggestIgnoreCaskLagging
+        }
+        if isProductionVersionSensitive {
+            return .cautionProductionVersion
+        }
+        return isLocalOlderThanCask ? .safeToAdoptAndUpgrade : .safeToAdopt
+    }
+
+    public var isSuggestedToIgnore: Bool {
+        advisory.recommendsIgnore
     }
 }
 
@@ -327,6 +535,7 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
     public let version: String
     public let appBundles: [String]
     public let downloadURL: String?
+    public let zapTrashPaths: [String]?
 
     public init(
         name: String,
@@ -336,7 +545,8 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         homepage: String,
         version: String,
         appBundles: [String],
-        downloadURL: String? = nil
+        downloadURL: String? = nil,
+        zapTrashPaths: [String]? = nil
     ) {
         self.name = name
         self.displayName = displayName
@@ -346,10 +556,120 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         self.version = version
         self.appBundles = appBundles
         self.downloadURL = downloadURL
+        self.zapTrashPaths = zapTrashPaths
     }
 }
 
 public struct CatalogIndex: Codable, Sendable {
     public let generatedAt: Date
     public let entries: [CatalogEntry]
+}
+
+// MARK: - v2.0 Advanced Maintenance Models (Leftovers, Services, Doctor & Taps)
+
+public enum MaintenanceSubTab: String, CaseIterable, Identifiable, Sendable {
+    case cacheAndOrphans = "cache"
+    case appLeftovers = "leftovers"
+    case services = "services"
+    case doctorAndTaps = "doctor"
+
+    public var id: String { rawValue }
+
+    public var localizedLabel: String {
+        switch self {
+        case .cacheAndOrphans:
+            return tr("📦 缓存与孤儿依赖", "📦 快取與孤兒依賴", "📦 Caches & Orphans")
+        case .appLeftovers:
+            return tr("🧹 卸载残留", "🧹 殘留清理", "🧹 Leftovers")
+        case .services:
+            return tr("⚙️ 后台服务", "⚙️ 背景服務", "⚙️ Services")
+        case .doctorAndTaps:
+            return tr("🩺 体检与 Tap", "🩺 體檢與 Tap", "🩺 Doctor & Taps")
+        }
+    }
+}
+
+public struct AppLeftoverItem: Identifiable, Hashable, Sendable {
+    public var id: String { fullPath }
+    public let caskToken: String
+    public let caskDisplayName: String
+    public let displayPath: String
+    public let fullPath: String
+    public let sizeBytes: Int64
+    public let modifiedAt: Date
+    public var isSelected: Bool
+
+    public init(
+        caskToken: String,
+        caskDisplayName: String,
+        displayPath: String,
+        fullPath: String,
+        sizeBytes: Int64,
+        modifiedAt: Date,
+        isSelected: Bool = true
+    ) {
+        self.caskToken = caskToken
+        self.caskDisplayName = caskDisplayName
+        self.displayPath = displayPath
+        self.fullPath = fullPath
+        self.sizeBytes = sizeBytes
+        self.modifiedAt = modifiedAt
+        self.isSelected = isSelected
+    }
+}
+
+public struct BrewServiceItem: Codable, Identifiable, Hashable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let status: String
+    public let user: String?
+    public let file: String?
+    public let exit_code: Int?
+
+    public init(name: String, status: String, user: String? = nil, file: String? = nil, exit_code: Int? = nil) {
+        self.name = name
+        self.status = status
+        self.user = user
+        self.file = file
+        self.exit_code = exit_code
+    }
+
+    public var isRunning: Bool {
+        status.lowercased() == "started" || status.lowercased() == "scheduled"
+    }
+
+    public var isError: Bool {
+        status.lowercased() == "error" || (exit_code != nil && exit_code != 0 && !isRunning)
+    }
+
+    public var statusBadgeText: String {
+        switch status.lowercased() {
+        case "started":
+            return tr("运行中 (Started)", "執行中 (Started)", "Running (Started)")
+        case "scheduled":
+            return tr("定时调度 (Scheduled)", "排程中 (Scheduled)", "Scheduled")
+        case "stopped", "none":
+            return tr("未运行 (Stopped)", "未執行 (Stopped)", "Stopped")
+        case "error":
+            if let code = exit_code {
+                return tr("异常退出 (Exit \(code))", "異常結束 (Exit \(code))", "Error (Exit \(code))")
+            }
+            return tr("异常 (Error)", "異常 (Error)", "Error")
+        default:
+            return status
+        }
+    }
+}
+
+public enum BrewDoctorState: Equatable, Sendable {
+    case idle
+    case running
+    case healthy(String)
+    case warnings([String], String)
+    case failed(String)
+
+    public var isRunning: Bool {
+        if case .running = self { return true }
+        return false
+    }
 }

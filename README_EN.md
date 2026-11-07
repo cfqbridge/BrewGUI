@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v1.6.261106-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.0.261107-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -41,9 +41,9 @@
 - **Silent Launch at Login**: Optionally start silently in the menu bar (`--silent`) and automatically hide the Dock icon whenever the main window is closed.
 - **Scheduled Background Checks**: Automatically run `brew update` every 12h or 72h in the background with a subtle red badge when updates arrive.
 
-### 2. 🔍 Instant Search & Local App Adoption (`Adopt`)
-- **Millisecond Full-Catalog Search**: Unified search across all Homebrew Formulae and Casks.
-- **Smart `/Applications` Scanner**: Automatically detects manually installed apps, distinguishing Mac App Store (`_MASReceipt`) and iOS/iPadOS wrapped bundles (`WrappedBundle`).
+### 2. 🔍 Bilingual Scenario Search & Smart Local App Adoption (`Adopt`)
+- **Millisecond Search with Category Pills**: Built-in dictionary of 170+ popular Mac apps with bilingual aliases, functional tags, and 11 one-click category presets (`Essentials`, `Screenshot`, `Archive`, `Media`, `Translate`, `Productivity`, `Dev & CLI`, `AI Tools`, `Network`, `System & Clean`).
+- **Smart `/Applications` Scanner & 4-Category Risk Advisories**: Automatically detects manually installed apps and flags **Mac App Store apps**, **version-locked production/plugin apps**, **apps with faster built-in updaters**, and **possible name/version collisions**, complete with a visual decision guide and one-click ignore for flagged items.
 - **Version-Aware Force Upgrade**: When a local app is older than the Homebrew Cask version, BrewGUI uses `brew install --cask --force` to adopt and upgrade the app in one step rather than merely claiming an outdated bundle.
 
 ### 3. 📦 Installed Packages & On-Disk Bundle Verification
@@ -51,9 +51,11 @@
 - **Real `Info.plist` Version Check**: Cross-checks `/Applications/<App>.app/Contents/Info.plist` against Homebrew's recorded version to catch version drift.
 - **Clean Uninstall & `--zap`**: Uninstall Casks normally or with `--zap` to purge associated caches and preference files.
 
-### 4. 🧹 Maintenance & Disk Cleanup
-- **Download Cache Inspector**: Inspect every cached archive in `~/Library/Caches/Homebrew/downloads`, reveal in Finder, delete individual files, or run `brew cleanup --prune=all` in one click.
-- **Orphan Dependency Removal (`autoremove`)**: Detect and remove unused Formula dependencies safely.
+### 4. 🧹 4-in-1 Advanced Maintenance (Cache / `:zap` Leftovers / Services / Doctor)
+- **Download Cache & Orphan Formulae**: Inspect every cached archive in `~/Library/Caches/Homebrew/downloads`, run `brew cleanup --prune=all`, and clean unused dependencies via `brew autoremove`.
+- **Uninstalled App Leftover Scanner (`:zap`)**: Cross-references Cask `:zap` rules against installed Brew packages and `/Applications` `CFBundleIdentifier`s to safely detect and move orphaned `~/Library` folders of previously uninstalled apps to macOS Trash.
+- **Background Services Manager (`brew services`)**: View, start, stop, restart, or run launchd background services (MySQL, Redis, PostgreSQL, Nginx, Ollama, Syncthing).
+- **Environment Health & Tap Manager (`brew doctor` & `brew tap`)**: Run `brew doctor` with structured warning cards and manage third-party Tap repositories (`user/repo`).
 
 ### 5. ⚡️ Batch Install & Environment Migration
 - **Paste & Parse**: Paste raw package lists or `brew install` scripts to resolve catalog status in real time.
@@ -75,7 +77,7 @@
 
 - **OS**: macOS 14.0 (Sonoma) or later
 - **Architecture**: Apple Silicon (`arm64` — M1 / M2 / M3 / M4)
-- **Prerequisite**: [Homebrew](https://brew.sh/) installed (default `/opt/homebrew`)
+- **Prerequisite**: [Homebrew](https://brew.sh/) installed (default `/opt/homebrew`; if not installed, BrewGUI v2.0 includes an in-app terminal-free graphical installer with mirror speed testing and automatic `PATH` configuration)
 
 ---
 

@@ -4,12 +4,13 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-APP_VERSION="${APP_VERSION:-1.6.261106}"
+APP_VERSION="${APP_VERSION:-2.0.261107}"
 
 echo "==> 1. Compiling BrewGUI v$APP_VERSION (Release, arm64)..."
-swift build -c release --arch arm64
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/tmp/clang-module-cache}"
+swift build --disable-sandbox -c release --arch arm64 -Xswiftc -module-cache-path -Xswiftc /tmp/swift-module-cache -Xcc -fmodules-cache-path=/tmp/clang-module-cache
 
-BIN_PATH="$(swift build -c release --arch arm64 --show-bin-path)/BrewGUI"
+BIN_PATH="$(swift build --disable-sandbox -c release --arch arm64 --show-bin-path)/BrewGUI"
 APP_BUNDLE="$PROJECT_DIR/dist/BrewGUI.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
@@ -65,7 +66,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
     <key>CFBundleShortVersionString</key>
     <string>${APP_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>261106</string>
+    <string>261107</string>
     <key>CFBundleLocalizations</key>
     <array>
         <string>zh_CN</string>
@@ -184,9 +185,24 @@ fi
 /usr/bin/hdiutil convert "$DMG_TEMP" -format UDZO -imagekey zlib-level=9 -o "$DMG_FINAL" >/dev/null
 rm -rf "$DMG_STAGING" "$DMG_TEMP"
 
+DMG_SHA256="$(/usr/bin/shasum -a 256 "$DMG_FINAL" | awk '{print $1}')"
+RELEASE_DATE="$(date +%Y-%m-%d)"
+VERSION_JSON="$PROJECT_DIR/dist/version.json"
+cat > "$VERSION_JSON" <<EOF
+{
+  "version": "${APP_VERSION}",
+  "release_date": "${RELEASE_DATE}",
+  "download_url": "https://github.com/cfqbridge/BrewGUI/releases/latest/download/BrewGUI.dmg",
+  "sha256": "${DMG_SHA256}",
+  "release_page": "https://github.com/cfqbridge/BrewGUI/releases/latest"
+}
+EOF
+echo "==> Generated version.json (sha256: $DMG_SHA256): $VERSION_JSON"
+
 if [[ -d "$PROJECT_DIR/site" ]]; then
     cp -f "$DMG_FINAL" "$PROJECT_DIR/site/BrewGUI.dmg"
-    echo "==> Synced DMG to:    $PROJECT_DIR/site/BrewGUI.dmg"
+    cp -f "$VERSION_JSON" "$PROJECT_DIR/site/version.json"
+    echo "==> Synced DMG & version.json to: $PROJECT_DIR/site/"
 fi
 
 echo "==> Done! App bundle: $APP_BUNDLE"

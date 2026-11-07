@@ -36,18 +36,38 @@ public final class BrewStore: ObservableObject {
 
     @Published public var catalogSearchQuery: String = ""
     @Published public var catalogTypeFilter: SearchTypeFilter = .all
+    @Published public var selectedSearchCategory: SearchCategoryPreset = .all
 
     // Batch Install state
     @Published public var batchInputText: String = ""
     @Published public var batchItems: [BatchInstallItem] = []
     @Published public var batchExportCopiedMessage: String?
 
-    // MenuBar & App Preferences (Language, Silent Launch at Login, Auto Check Updates, Self-Update)
+    // MenuBar & App Preferences (Language, Mirror Source, Silent Launch at Login, Auto Check Updates, Self-Update)
     @Published public var appLanguage: AppLanguage = AppLanguage.current {
         didSet {
             AppLanguage.current = appLanguage
         }
     }
+    @Published public var mirrorSource: BrewMirrorSource = .auto {
+        didSet {
+            guard !isInitializingPreferences else { return }
+            UserDefaults.standard.set(mirrorSource.rawValue, forKey: "BrewGUI.mirrorSource")
+            Task {
+                await applyOrProbeMirrorSource()
+            }
+        }
+    }
+    @Published public var resolvedMirror: BrewMirrorSource = .official
+    @Published public var mirrorLatenciesMs: [BrewMirrorSource: Int] = [:]
+    @Published public var isProbingMirrors: Bool = false
+
+    // Onboarding & Adopt Guide State
+    @Published public var homebrewInstallState: HomebrewInstallState = .idle
+    @Published public var homebrewInstallLog: String = ""
+    @Published public var showTerminalFallbackInGuide: Bool = false
+    @Published public var showAdoptGuideSheet: Bool = false
+
     @Published public var selfUpdateState: AppSelfUpdateState = .idle
 
     @Published public var launchAtLoginSilent: Bool = false {
@@ -75,9 +95,18 @@ public final class BrewStore: ObservableObject {
     // Package Download Size Probing & Maintenance Cache State
     @Published public var packageSizesByToken: [String: Int64] = [:]
     @Published public var isProbingSizes: Bool = false
+    @Published public var maintenanceSubTab: MaintenanceSubTab = .cacheAndOrphans
     @Published public var cachedDownloadFiles: [CachedDownloadFile] = []
     @Published public var orphanFormulae: [String] = []
     @Published public var isScanningOrphans: Bool = false
+    @Published public var appLeftovers: [AppLeftoverItem] = []
+    @Published public var isScanningLeftovers: Bool = false
+    @Published public var brewServices: [BrewServiceItem] = []
+    @Published public var isLoadingServices: Bool = false
+    @Published public var doctorState: BrewDoctorState = .idle
+    @Published public var tappedRepositories: [String] = []
+    @Published public var isLoadingTaps: Bool = false
+    @Published public var newTapInput: String = ""
     @Published public var isProcessingQueue: Bool = false
 
     private var packageSizesByFileName: [String: Int64] = [:]
@@ -110,6 +139,7 @@ public final class BrewStore: ObservableObject {
                 }
             }
             Task {
+                await applyOrProbeMirrorSource()
                 await initialLoad()
                 requestAndCheckAppManagementPermission()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -130,12 +160,32 @@ public final class BrewStore: ObservableObject {
         adoptCandidates.filter { !$0.isIgnored }
     }
 
+    public var suggestedIgnoreAdoptCandidates: [AdoptCandidate] {
+        activeAdoptCandidates.filter { $0.isSuggestedToIgnore }
+    }
+
     public var ignoredAdoptCandidatesList: [AdoptCandidate] {
         adoptCandidates.filter { $0.isIgnored }
     }
 
     public var totalCachedDownloadsBytes: Int64 {
         cachedDownloadFiles.reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    public var totalLeftoversBytes: Int64 {
+        appLeftovers.reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    public var totalSelectedLeftoversBytes: Int64 {
+        appLeftovers.filter(\.isSelected).reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    public var selectedLeftoversCount: Int {
+        appLeftovers.filter(\.isSelected).count
+    }
+
+    public var runningServicesCount: Int {
+        brewServices.filter(\.isRunning).count
     }
 
     public func formattedSize(for token: String) -> String? {
@@ -223,6 +273,12 @@ public final class BrewStore: ObservableObject {
         launchAtLoginSilent = FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
         let savedHours = UserDefaults.standard.integer(forKey: "BrewGUI.autoUpdateIntervalHours")
         autoUpdateInterval = AutoUpdateInterval(rawValue: savedHours) ?? .off
+        if let savedMirror = UserDefaults.standard.string(forKey: "BrewGUI.mirrorSource"),
+           let parsedMirror = BrewMirrorSource(rawValue: savedMirror) {
+            mirrorSource = parsedMirror
+        } else {
+            mirrorSource = .auto
+        }
         rescheduleAutoUpdateTimer()
     }
 
@@ -302,7 +358,278 @@ public final class BrewStore: ObservableObject {
             let stamp = Self.dateTimeFormatter.string(from: Date())
             BrewCommandRunner.appendToDiskLog("\n[\(stamp)] [AutoUpdate] Triggered scheduled brew update (interval: \(autoUpdateInterval.label))\n")
             checkUpdates(expandDrawer: false)
+            Task {
+                await checkForAppUpdate(userInitiated: false)
+            }
         }
+    }
+
+    // MARK: - Mirror Source Probing & Scheduling
+
+    public func applyOrProbeMirrorSource() async {
+        if mirrorSource != .auto {
+            resolvedMirror = mirrorSource
+            await BrewCommandRunner.shared.setActiveMirror(mirrorSource)
+            let stamp = Self.dateTimeFormatter.string(from: Date())
+            BrewCommandRunner.appendToDiskLog("[\(stamp)] [Mirror] Set explicit mirror source: \(mirrorSource.rawValue)\n")
+            return
+        }
+        await probeAndResolveMirror()
+    }
+
+    public func probeAndResolveMirror() async {
+        isProbingMirrors = true
+        defer { isProbingMirrors = false }
+
+        let candidates: [BrewMirrorSource] = [.ustc, .tuna, .official]
+        var measured: [BrewMirrorSource: Int] = [:]
+
+        await withTaskGroup(of: (BrewMirrorSource, Int?).self) { group in
+            for src in candidates {
+                let urlStr = src.probeURLString
+                group.addTask {
+                    let ms = await Self.measureLatencyMs(urlString: urlStr)
+                    return (src, ms)
+                }
+            }
+            for await (src, ms) in group {
+                if let ms {
+                    measured[src] = ms
+                }
+            }
+        }
+
+        mirrorLatenciesMs = measured
+
+        let chosen: BrewMirrorSource
+        if mirrorSource != .auto {
+            chosen = mirrorSource
+        } else if let offMs = measured[.official], offMs <= 450,
+                  offMs <= (measured[.ustc] ?? Int.max),
+                  offMs <= (measured[.tuna] ?? Int.max) {
+            chosen = .official
+        } else if let ustcMs = measured[.ustc], let tunaMs = measured[.tuna] {
+            chosen = (ustcMs <= tunaMs) ? .ustc : .tuna
+        } else if measured[.ustc] != nil {
+            chosen = .ustc
+        } else if measured[.tuna] != nil {
+            chosen = .tuna
+        } else if measured[.official] != nil {
+            chosen = .official
+        } else {
+            chosen = .ustc
+        }
+
+        resolvedMirror = chosen
+        await BrewCommandRunner.shared.setActiveMirror(chosen)
+        let summary = candidates.map { src in
+            if let ms = measured[src] { return "\(src.rawValue)=\(ms)ms" }
+            return "\(src.rawValue)=timeout"
+        }.joined(separator: ", ")
+        let stamp = Self.dateTimeFormatter.string(from: Date())
+        BrewCommandRunner.appendToDiskLog("[\(stamp)] [Mirror] Auto-probe resolved to \(chosen.rawValue) (\(summary))\n")
+    }
+
+    private static func measureLatencyMs(urlString: String) async -> Int? {
+        guard let url = URL(string: urlString) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "HEAD"
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        req.timeoutInterval = 3.0
+        let start = DispatchTime.now()
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse, (200...399).contains(http.statusCode) {
+                let elapsedNs = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
+                return max(1, Int(elapsedNs / 1_000_000))
+            }
+        } catch {}
+        return nil
+    }
+
+    // MARK: - In-App Terminal-Free Homebrew GUI Installer
+
+    public func installHomebrewInApp() {
+        guard !homebrewInstallState.isRunning else { return }
+        homebrewInstallLog = ""
+        homebrewInstallState = .probingMirrors
+
+        Task { @MainActor in
+            let appendInstallLog: (String) -> Void = { [weak self = self] chunk in
+                guard let self else { return }
+                self.homebrewInstallLog.append(chunk)
+                BrewCommandRunner.appendToDiskLog(chunk)
+            }
+
+            let stamp = Self.dateTimeFormatter.string(from: Date())
+            appendInstallLog("\n[\(stamp)] ==> [1/4] \(tr("正在测速并选择最佳 Homebrew 安装源…", "正在測速並選擇最佳 Homebrew 安裝源…", "Probing mirrors for fastest Homebrew installation source…"))\n")
+            await probeAndResolveMirror()
+
+            let activeMirror = (mirrorSource == .auto) ? resolvedMirror : mirrorSource
+            let latencyNote = mirrorLatenciesMs[activeMirror].map { " (\($0) ms)" } ?? ""
+            appendInstallLog("==> \(tr("已选定安装源", "已選定安裝源", "Selected mirror")): \(activeMirror.label)\(latencyNote)\n")
+
+            homebrewInstallState = .authorizing
+            appendInstallLog("==> [2/4] \(tr("正在获取官方安装脚本并请求管理员权限…", "正在取得官方安裝腳本並請求管理員權限…", "Fetching installer script and requesting administrator authorization…"))\n")
+
+            let scriptURLs: [String] = {
+                switch activeMirror {
+                case .ustc, .tuna:
+                    return [
+                        "https://mirrors.ustc.edu.cn/misc/brew-install.sh",
+                        "https://ghfast.top/https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+                        "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+                    ]
+                case .auto, .official:
+                    return [
+                        "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+                        "https://ghfast.top/https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+                        "https://mirrors.ustc.edu.cn/misc/brew-install.sh"
+                    ]
+                }
+            }()
+
+            var fetchedScript: String? = nil
+            for urlStr in scriptURLs {
+                guard let url = URL(string: urlStr) else { continue }
+                var req = URLRequest(url: url)
+                req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                req.timeoutInterval = 12.0
+                if let (data, resp) = try? await URLSession.shared.data(for: req),
+                   let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                   let text = String(data: data, encoding: .utf8),
+                   text.contains("HOMEBREW_PREFIX") {
+                    fetchedScript = text
+                    appendInstallLog("✓ \(tr("成功获取安装脚本", "成功取得安裝腳本", "Fetched installer script")) (\(urlStr))\n")
+                    break
+                }
+            }
+
+            guard let rawScript = fetchedScript else {
+                let errMsg = tr("无法下载 Homebrew 安装脚本，请检查网络连接或切换国内镜像源重试。", "無法下載 Homebrew 安裝腳本，請檢查網路連線或切換國內鏡像源重試。", "Failed to download Homebrew install script. Please check network or switch mirror.")
+                homebrewInstallState = .failed(errMsg)
+                appendInstallLog("✗ \(errMsg)\n")
+                return
+            }
+
+            guard let askpassPath = try? await BrewCommandRunner.shared.ensureAskpassScript() else {
+                let errMsg = tr("无法准备密码授权组件", "無法準備密碼授權元件", "Failed to prepare authorization helper")
+                homebrewInstallState = .failed(errMsg)
+                return
+            }
+
+            let fm = FileManager.default
+            let sudoWrapperPath = "/tmp/brewgui_sudo_askpass_wrapper.sh"
+            let installerScriptPath = "/tmp/brewgui_homebrew_install.sh"
+
+            do {
+                let wrapperContent = """
+                #!/bin/sh
+                exec /usr/bin/sudo -A "$@"
+                """
+                try wrapperContent.write(toFile: sudoWrapperPath, atomically: true, encoding: .utf8)
+                try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sudoWrapperPath)
+
+                // Pre-verify administrator password via native macOS GUI dialog before running the full script
+                var authEnv = ProcessInfo.processInfo.environment
+                authEnv["SUDO_ASKPASS"] = askpassPath
+                authEnv["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+                let authStatus = try await BrewCommandRunner.shared.runExecutableStreaming(
+                    executablePath: "/usr/bin/sudo",
+                    arguments: ["-A", "-v"],
+                    environment: authEnv
+                ) { chunk in
+                    Task { @MainActor in appendInstallLog(chunk) }
+                }
+
+                guard authStatus == 0 else {
+                    let cancelMsg = tr("管理员密码授权已取消或密码错误，安装中止。", "管理員密碼授權已取消或密碼錯誤，安裝中止。", "Administrator authentication cancelled or failed.")
+                    homebrewInstallState = .failed(cancelMsg)
+                    appendInstallLog("✗ \(cancelMsg)\n")
+                    return
+                }
+
+                appendInstallLog("✓ \(tr("管理员授权通过，开始自动化部署 Homebrew…", "管理員授權通過，開始自動化部署 Homebrew…", "Authorization succeeded. Deploying Homebrew…"))\n")
+                homebrewInstallState = .installing(tr("正在下载并部署 /opt/homebrew…", "正在下載並部署 /opt/homebrew…", "Downloading and deploying /opt/homebrew…"))
+
+                // Rewrite /usr/bin/sudo calls in install.sh to our SUDO_ASKPASS wrapper so non-TTY sudo calls never fail
+                let patchedScript = rawScript.replacingOccurrences(of: "/usr/bin/sudo", with: sudoWrapperPath)
+                try patchedScript.write(toFile: installerScriptPath, atomically: true, encoding: .utf8)
+                try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installerScriptPath)
+
+                var installEnv = authEnv
+                installEnv["NONINTERACTIVE"] = "1"
+                installEnv["CI"] = "1"
+                for (k, v) in activeMirror.environmentVariables {
+                    installEnv[k] = v
+                }
+
+                appendInstallLog("==> [3/4] \(tr("正在执行免交互安装 (NONINTERACTIVE=1)…", "正在執行免互動安裝 (NONINTERACTIVE=1)…", "Running non-interactive installation (NONINTERACTIVE=1)…"))\n")
+
+                let exitCode = try await BrewCommandRunner.shared.runExecutableStreaming(
+                    executablePath: "/bin/bash",
+                    arguments: [installerScriptPath],
+                    environment: installEnv
+                ) { [weak self = self] chunk in
+                    Task { @MainActor in
+                        appendInstallLog(chunk)
+                        if let self, case .installing = self.homebrewInstallState {
+                            if let arrowLine = chunk.split(whereSeparator: \.isNewline).last(where: { $0.contains("==>") }) {
+                                let cleanStep = String(arrowLine).replacingOccurrences(of: "==>", with: "").trimmingCharacters(in: .whitespaces)
+                                if !cleanStep.isEmpty {
+                                    self.homebrewInstallState = .installing(cleanStep)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                try? fm.removeItem(atPath: installerScriptPath)
+                try? fm.removeItem(atPath: sudoWrapperPath)
+
+                if let detectedBrew = BrewCommandRunner.detectBrewExecutablePath() {
+                    homebrewInstallState = .configuringPath
+                    appendInstallLog("\n==> [4/4] \(tr("正在自动配置 ~/.zprofile 环境变量…", "正在自動配置 ~/.zprofile 環境變數…", "Configuring ~/.zprofile PATH environment…"))\n")
+                    Self.ensureShellProfileConfigured(brewPath: detectedBrew)
+                    appendInstallLog("✓ \(tr("Homebrew 安装与环境配置已全部完成！", "Homebrew 安裝與環境配置已全部完成！", "Homebrew installation and PATH setup completed!"))\n")
+                    homebrewInstallState = .succeeded
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    recheckBrewInstallation()
+                } else {
+                    let failMsg = tr("安装进程已结束 (退出码 \(exitCode))，但未检测到 /opt/homebrew/bin/brew。请查看上方日志或切换镜像源重试。", "安裝行程已結束 (退出碼 \(exitCode))，但未偵測到 /opt/homebrew/bin/brew。請查看上方日誌或切換鏡像源重試。", "Installer exited (code \(exitCode)), but /opt/homebrew/bin/brew was not found. Check log or try another mirror.")
+                    homebrewInstallState = .failed(failMsg)
+                    appendInstallLog("✗ \(failMsg)\n")
+                }
+            } catch {
+                let errMsg = error.localizedDescription
+                homebrewInstallState = .failed(errMsg)
+                appendInstallLog("✗ \(errMsg)\n")
+            }
+        }
+    }
+
+    public func cancelHomebrewInstall() {
+        Task {
+            await BrewCommandRunner.shared.terminateActiveProcess()
+            await MainActor.run {
+                let msg = tr("已手动停止安装", "已手動停止安裝", "Installation stopped by user")
+                self.homebrewInstallState = .failed(msg)
+                self.homebrewInstallLog.append("\n⏹ \(msg)\n")
+            }
+        }
+    }
+
+    public static func ensureShellProfileConfigured(brewPath: String) {
+        let fm = FileManager.default
+        let zprofileURL = fm.homeDirectoryForCurrentUser.appendingPathComponent(".zprofile")
+        let evalLine = "eval \"$(\(brewPath) shellenv)\""
+        let existing = (try? String(contentsOf: zprofileURL, encoding: .utf8)) ?? ""
+        guard !existing.contains("brew shellenv") else { return }
+        let addition = (existing.isEmpty || existing.hasSuffix("\n") ? "" : "\n")
+            + "# Added by BrewGUI for Homebrew\n"
+            + evalLine + "\n"
+        let updated = existing + addition
+        try? updated.write(to: zprofileURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: - In-App Self-Update (Checking version.json, SHA256 Verification & Hot-Swap)
@@ -351,20 +678,23 @@ public final class BrewStore: ObservableObject {
             }
         }
 
+        let stamp = Self.dateTimeFormatter.string(from: Date())
         guard let remote = fetchedInfo else {
             if userInitiated {
                 selfUpdateState = .failed(tr("检查更新失败", "檢查更新失敗", "Update check failed"))
-                BrewCommandRunner.appendToDiskLog("[SelfUpdate] Check failed: \(lastErr)\n")
+                BrewCommandRunner.appendToDiskLog("[\(stamp)] [SelfUpdate] Manual check failed: \(lastErr)\n")
+            } else {
+                BrewCommandRunner.appendToDiskLog("[\(stamp)] [SelfUpdate] Silent check skipped (unreachable: \(lastErr))\n")
             }
             return
         }
 
         if Self.isRemoteVersionNewer(remote: remote.version, local: AppConstants.versionString) {
             selfUpdateState = .updateAvailable(remote)
-            BrewCommandRunner.appendToDiskLog("[SelfUpdate] Update available: v\(remote.version) (current: v\(AppConstants.versionString))\n")
+            BrewCommandRunner.appendToDiskLog("[\(stamp)] [SelfUpdate] Update available: v\(remote.version) (current: v\(AppConstants.versionString))\n")
         } else {
             selfUpdateState = .upToDate(remote.version)
-            BrewCommandRunner.appendToDiskLog("[SelfUpdate] Already up to date (v\(AppConstants.versionString), remote: v\(remote.version))\n")
+            BrewCommandRunner.appendToDiskLog("[\(stamp)] [SelfUpdate] Already up to date (v\(AppConstants.versionString), remote: v\(remote.version))\n")
         }
     }
 
@@ -567,6 +897,16 @@ public final class BrewStore: ObservableObject {
         recomputeAdoptCandidates()
     }
 
+    public func ignoreAllSuggestedAdoptCandidates() {
+        let tokensToIgnore = suggestedIgnoreAdoptCandidates.map(\.caskToken)
+        guard !tokensToIgnore.isEmpty else { return }
+        for tok in tokensToIgnore {
+            ignoredAdoptTokens.insert(tok)
+        }
+        saveIgnoredAdoptTokens()
+        recomputeAdoptCandidates()
+    }
+
     // MARK: - Brew Detection & Initial Load
 
     public func recheckBrewInstallation() {
@@ -591,9 +931,12 @@ public final class BrewStore: ObservableObject {
             group.addTask { await self.refreshInstalled() }
             group.addTask { await self.refreshCatalog(forceRebuild: false) }
             group.addTask { await self.scanOrphanFormulae() }
+            group.addTask { await self.refreshServices() }
+            group.addTask { await self.refreshTaps() }
         }
         scanCachedDownloads()
         recomputeAdoptCandidates()
+        await scanAppLeftovers()
         probeOutdatedPackageSizes()
         if !batchInputText.isEmpty {
             parseBatchInput()
@@ -732,7 +1075,12 @@ public final class BrewStore: ObservableObject {
         defer { isLoadingCatalog = false }
 
         do {
-            let entries = try await BrewCatalogService.shared.loadCatalog(forceRebuild: forceRebuild)
+            var entries = try await BrewCatalogService.shared.loadCatalog(forceRebuild: forceRebuild)
+            if entries.isEmpty {
+                // On a freshly installed Homebrew setup, trigger a lightweight API fetch so ~/Library/Caches/Homebrew/api is populated
+                _ = try? await BrewCommandRunner.shared.runCapture(arguments: ["search", "brew"], allowAutoUpdate: true)
+                entries = try await BrewCatalogService.shared.loadCatalog(forceRebuild: true)
+            }
             self.catalogEntries = entries
             self.scanLocalApplications()
             self.recomputeAdoptCandidates()
@@ -868,6 +1216,7 @@ public final class BrewStore: ObservableObject {
         var formulaByName: [String: CatalogEntry] = [:]
         var caskByName: [String: CatalogEntry] = [:]
         var entryByDisplayName: [String: CatalogEntry] = [:]
+        var entryByChineseName: [String: CatalogEntry] = [:]
 
         for entry in catalogEntries {
             let lowerName = entry.name.lowercased()
@@ -880,6 +1229,13 @@ public final class BrewStore: ObservableObject {
             if entryByDisplayName[lowerDisplay] == nil {
                 entryByDisplayName[lowerDisplay] = entry
             }
+            if let zhMeta = ChineseSearchIndex.meta(for: lowerName) {
+                let zhTitle = zhMeta.zhName.lowercased()
+                entryByChineseName[zhTitle] = entry
+                if let primaryZh = zhTitle.split(separator: " ").first {
+                    entryByChineseName[String(primaryZh)] = entry
+                }
+            }
         }
 
         var parsed: [BatchInstallItem] = []
@@ -887,8 +1243,13 @@ public final class BrewStore: ObservableObject {
             let lower = token.lowercased()
             // Support explicit prefix like cask:wechat or homebrew/cask/wechat
             let cleanToken = (lower as NSString).lastPathComponent
+            let resolvedChineseToken = entryByChineseName[lower]?.name.lowercased()
 
-            if let inst = installedPackages.first(where: { $0.name.lowercased() == cleanToken || $0.displayName.lowercased() == lower }) {
+            if let inst = installedPackages.first(where: {
+                $0.name.lowercased() == cleanToken
+                    || $0.displayName.lowercased() == lower
+                    || (resolvedChineseToken != nil && $0.name.lowercased() == resolvedChineseToken!)
+            }) {
                 parsed.append(
                     BatchInstallItem(
                         id: token,
@@ -908,7 +1269,7 @@ public final class BrewStore: ObservableObject {
                 if lower.hasPrefix("formula:") || lower.contains("homebrew/core/") {
                     return formulaByName[cleanToken]
                 }
-                return formulaByName[cleanToken] ?? caskByName[cleanToken] ?? entryByDisplayName[lower]
+                return formulaByName[cleanToken] ?? caskByName[cleanToken] ?? entryByDisplayName[lower] ?? entryByChineseName[lower]
             }()
 
             if let entry = matchedEntry {
@@ -1197,6 +1558,346 @@ public final class BrewStore: ObservableObject {
         enqueueTask(
             title: tr("清理无用孤儿依赖 (brew autoremove)", "清理無用孤兒依賴 (brew autoremove)", "Remove unused orphan dependencies (brew autoremove)"),
             arguments: ["autoremove"]
+        )
+    }
+
+    // MARK: - v2.0 Module 4: Uninstalled App Leftovers (:zap), Services & Doctor/Taps
+
+    public func scanAppLeftovers() async {
+        guard !isScanningLeftovers else { return }
+        isScanningLeftovers = true
+        defer { isScanningLeftovers = false }
+
+        scanLocalApplications()
+        let allCasks = catalogEntries.filter { $0.type == .cask }
+        guard !allCasks.isEmpty else { return }
+
+        let installedTokens = Set(installedPackages.map { $0.name.lowercased() })
+        let localAppsLower = Set(localApplicationsSet.map { $0.lowercased() })
+        let localAppBaseNamesLower = Set(localAppsLower.map { ($0 as NSString).deletingPathExtension })
+        let runningBundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier?.lowercased() })
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+
+        let foundItems = await Task.detached(priority: .utility) { () -> [AppLeftoverItem] in
+            let fm = FileManager.default
+
+            // Collect CFBundleIdentifiers of all currently installed .app bundles in /Applications and ~/Applications
+            var installedBundleIDs = runningBundleIDs
+            let appDirs = ["/Applications", (homePath as NSString).appendingPathComponent("Applications")]
+            for dir in appDirs {
+                guard let items = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+                for item in items where item.hasSuffix(".app") {
+                    let appPath = (dir as NSString).appendingPathComponent(item)
+                    for relPlist in ["Contents/Info.plist", "WrappedBundle/Info.plist"] {
+                        let plistPath = (appPath as NSString).appendingPathComponent(relPlist)
+                        if let dict = NSDictionary(contentsOfFile: plistPath),
+                           let bid = (dict["CFBundleIdentifier"] as? String)?.lowercased(),
+                           !bid.isEmpty {
+                            installedBundleIDs.insert(bid)
+                        }
+                    }
+                }
+            }
+
+            var pathOwners: [String: [CatalogEntry]] = [:]
+            for entry in allCasks {
+                guard let zaps = entry.zapTrashPaths, !zaps.isEmpty else { continue }
+                for rawPath in zaps where BrewCatalogService.isSafeUserLibraryZapPath(rawPath) {
+                    var clean = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                    while clean.hasSuffix("/") { clean.removeLast() }
+                    pathOwners[clean, default: []].append(entry)
+                }
+            }
+
+            var results: [AppLeftoverItem] = []
+            for (displayPath, owners) in pathOwners {
+                let lowerPath = displayPath.lowercased()
+                if lowerPath.contains("brewgui")
+                    || lowerPath.contains("local.orca.brewgui")
+                    || lowerPath.contains("contextstoreagent")
+                    || lowerPath.contains("com.microsoft.shared") {
+                    continue
+                }
+
+                // 1. If the path matches the CFBundleIdentifier of any currently installed or running .app on disk, skip!
+                if installedBundleIDs.contains(where: { !$0.isEmpty && lowerPath.contains($0) }) {
+                    continue
+                }
+
+                // 2. If ANY owning Cask (including @beta/@cn/-classic variants or :pkg installers) is installed via Homebrew or present in /Applications, skip!
+                let isAnyOwnerInstalled = owners.contains { owner in
+                    let ownerTokenLower = owner.name.lowercased()
+                    if installedTokens.contains(ownerTokenLower) {
+                        return true
+                    }
+                    let baseToken = ownerTokenLower
+                        .replacingOccurrences(of: "-classic", with: "")
+                        .replacingOccurrences(of: "-cli", with: "")
+                        .split(separator: "@").first.map(String.init) ?? ownerTokenLower
+                    if installedTokens.contains(baseToken) {
+                        return true
+                    }
+                    for bundle in owner.appBundles {
+                        let bLower = bundle.lowercased()
+                        let bBase = (bLower as NSString).deletingPathExtension
+                        if localAppsLower.contains(bLower)
+                            || localAppBaseNamesLower.contains(where: { $0 == bBase || $0.hasPrefix(bBase + " ") }) {
+                            return true
+                        }
+                    }
+                    let dispLower = owner.displayName.lowercased()
+                    if !dispLower.isEmpty,
+                       localAppBaseNamesLower.contains(where: { $0 == dispLower || $0.hasPrefix(dispLower + " ") }) {
+                        return true
+                    }
+                    if owner.appBundles.isEmpty {
+                        // CLI-only Cask: check if binary exists in /opt/homebrew/bin or /usr/local/bin
+                        if fm.fileExists(atPath: "/opt/homebrew/bin/\(baseToken)") || fm.fileExists(atPath: "/usr/local/bin/\(baseToken)") {
+                            return true
+                        }
+                    }
+                    return false
+                }
+                if isAnyOwnerInstalled { continue }
+
+                let relFromHome = String(displayPath.dropFirst(2)) // drop "~/"
+                let fullPath = (homePath as NSString).appendingPathComponent(relFromHome)
+                guard fm.fileExists(atPath: fullPath) else { continue }
+
+                let (bytes, mtime) = Self.measureFileOrDirectorySize(atPath: fullPath)
+                guard bytes >= 512 else { continue }
+
+                // Prefer non-variant Cask token as primary owner label
+                let primaryOwner = owners.first(where: { !$0.name.contains("@") }) ?? owners[0]
+                results.append(
+                    AppLeftoverItem(
+                        caskToken: primaryOwner.name,
+                        caskDisplayName: primaryOwner.displayName,
+                        displayPath: displayPath,
+                        fullPath: fullPath,
+                        sizeBytes: bytes,
+                        modifiedAt: mtime,
+                        isSelected: true
+                    )
+                )
+            }
+
+            results.sort { $0.sizeBytes > $1.sizeBytes }
+            return results
+        }.value
+
+        self.appLeftovers = foundItems
+    }
+
+    nonisolated private static func measureFileOrDirectorySize(atPath path: String) -> (Int64, Date) {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return (0, .distantPast) }
+        let rootAttrs = try? fm.attributesOfItem(atPath: path)
+        let rootMtime = (rootAttrs?[.modificationDate] as? Date) ?? .distantPast
+
+        if !isDir.boolValue {
+            let size = (rootAttrs?[.size] as? NSNumber)?.int64Value ?? 0
+            return (size, rootMtime)
+        }
+
+        let rootURL = URL(fileURLWithPath: path, isDirectory: true)
+        guard let enumerator = fm.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey],
+            options: []
+        ) else {
+            return (0, rootMtime)
+        }
+
+        var total: Int64 = 0
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            count += 1
+            if count > 8000 { break }
+            if let vals = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
+               vals.isRegularFile == true,
+               vals.isSymbolicLink != true {
+                total += Int64(vals.fileSize ?? 0)
+            }
+        }
+        return (total, rootMtime)
+    }
+
+    public func toggleLeftoverSelection(id: String) {
+        guard let idx = appLeftovers.firstIndex(where: { $0.id == id }) else { return }
+        appLeftovers[idx].isSelected.toggle()
+    }
+
+    public func setAllLeftoversSelection(_ selected: Bool) {
+        for idx in appLeftovers.indices {
+            appLeftovers[idx].isSelected = selected
+        }
+    }
+
+    public func revealLeftoverInFinder(_ item: AppLeftoverItem) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.fullPath)])
+    }
+
+    public func cleanSelectedLeftovers(moveToTrash: Bool = true) {
+        let selected = appLeftovers.filter(\.isSelected)
+        guard !selected.isEmpty else { return }
+
+        let fm = FileManager.default
+        var cleanedCount = 0
+        var freedBytes: Int64 = 0
+        let stamp = Self.dateTimeFormatter.string(from: Date())
+
+        for item in selected {
+            let url = URL(fileURLWithPath: item.fullPath)
+            guard fm.fileExists(atPath: item.fullPath) else { continue }
+            do {
+                if moveToTrash {
+                    try fm.trashItem(at: url, resultingItemURL: nil)
+                } else {
+                    try fm.removeItem(at: url)
+                }
+                cleanedCount += 1
+                freedBytes += item.sizeBytes
+            } catch {
+                // Fallback to removeItem if trashItem fails on specific volumes
+                if moveToTrash, (try? fm.removeItem(at: url)) != nil {
+                    cleanedCount += 1
+                    freedBytes += item.sizeBytes
+                } else {
+                    appendLog("[\(stamp)] [Leftovers] Failed to remove \(item.displayPath): \(error.localizedDescription)\n")
+                }
+            }
+        }
+
+        let freedStr = AppConstants.formatBytes(freedBytes)
+        let modeLabel = moveToTrash
+            ? tr("已移至废纸篓", "已移至垃圾桶", "Moved to Trash")
+            : tr("已彻底删除", "已徹底刪除", "Permanently deleted")
+        appendLog("\n[\(stamp)] 🧹 \(modeLabel): \(cleanedCount) \(tr("项已卸载软件残留", "項已解除安裝軟體殘留", "uninstalled app leftovers")) (\(freedStr))\n")
+        Task {
+            await scanAppLeftovers()
+        }
+    }
+
+    // MARK: - Background Services (`brew services`)
+
+    public func refreshServices() async {
+        isLoadingServices = true
+        defer { isLoadingServices = false }
+
+        do {
+            let (out, _, exitCode) = try await BrewCommandRunner.shared.runCapture(arguments: ["services", "list", "--json"])
+            guard exitCode == 0 else { return }
+            // Find the JSON array in stdout (skipping any warnings)
+            let rawText = String(data: out, encoding: .utf8) ?? "[]"
+            if let startIdx = rawText.firstIndex(of: "["),
+               let endIdx = rawText.lastIndex(of: "]"),
+               startIdx <= endIdx {
+                let jsonSlice = String(rawText[startIdx...endIdx])
+                if let jsonData = jsonSlice.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode([BrewServiceItem].self, from: jsonData) {
+                    self.brewServices = decoded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                    return
+                }
+            }
+            self.brewServices = []
+        } catch {
+            self.brewServices = []
+        }
+    }
+
+    public func controlService(_ service: BrewServiceItem, action: String) {
+        let actionTitle: String = {
+            switch action {
+            case "start": return tr("启动后台服务", "啟動背景服務", "Start service")
+            case "stop": return tr("停止后台服务", "停止背景服務", "Stop service")
+            case "restart": return tr("重启后台服务", "重啟背景服務", "Restart service")
+            case "run": return tr("单次运行服务", "單次執行服務", "Run service once")
+            default: return "brew services \(action)"
+            }
+        }()
+        enqueueTask(
+            title: "\(actionTitle): \(service.name) (brew services \(action) \(service.name))",
+            arguments: ["services", action, service.name]
+        )
+    }
+
+    public func revealServicePlistInFinder(_ service: BrewServiceItem) {
+        guard let file = service.file, !file.isEmpty else { return }
+        let expanded = (file as NSString).expandingTildeInPath
+        if FileManager.default.fileExists(atPath: expanded) {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: expanded)])
+        }
+    }
+
+    // MARK: - Environment Doctor & Tap Management (`brew doctor` & `brew tap`)
+
+    public func runBrewDoctor() async {
+        guard !doctorState.isRunning else { return }
+        doctorState = .running
+
+        do {
+            let (out, err, exitCode) = try await BrewCommandRunner.shared.runCapture(arguments: ["doctor"])
+            let outStr = String(data: out, encoding: .utf8) ?? ""
+            let combined = (outStr + "\n" + err).trimmingCharacters(in: .whitespacesAndNewlines)
+            let stamp = Self.dateTimeFormatter.string(from: Date())
+            BrewCommandRunner.appendToDiskLog("\n[\(stamp)] [Doctor] exit=\(exitCode)\n\(combined)\n")
+
+            if exitCode == 0 || combined.contains("Your system is ready to brew") {
+                doctorState = .healthy(combined.isEmpty ? "Your system is ready to brew." : combined)
+            } else {
+                // Split into individual warning blocks
+                let rawBlocks = combined.components(separatedBy: "Warning:")
+                var warnings: [String] = []
+                for block in rawBlocks.dropFirst() {
+                    let trimmed = block.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        warnings.append("Warning: " + trimmed)
+                    }
+                }
+                if warnings.isEmpty && !combined.isEmpty {
+                    warnings = [combined]
+                }
+                doctorState = .warnings(warnings, combined)
+            }
+        } catch {
+            doctorState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func refreshTaps() async {
+        isLoadingTaps = true
+        defer { isLoadingTaps = false }
+
+        do {
+            let (out, _, exitCode) = try await BrewCommandRunner.shared.runCapture(arguments: ["tap"])
+            guard exitCode == 0 else { return }
+            let text = String(data: out, encoding: .utf8) ?? ""
+            let taps = text
+                .split(whereSeparator: \.isNewline)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && $0.contains("/") }
+            self.tappedRepositories = taps.sorted()
+        } catch {
+            self.tappedRepositories = []
+        }
+    }
+
+    public func addTap(_ rawRepo: String) {
+        let repo = rawRepo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !repo.isEmpty, repo.contains("/") else { return }
+        newTapInput = ""
+        enqueueTask(
+            title: tr("添加软件源仓库 \(repo) (brew tap)", "新增軟體源倉庫 \(repo) (brew tap)", "Add Tap repository \(repo) (brew tap)"),
+            arguments: ["tap", repo]
+        )
+    }
+
+    public func removeTap(_ repo: String) {
+        enqueueTask(
+            title: tr("移除软件源仓库 \(repo) (brew untap)", "移除軟體源倉庫 \(repo) (brew untap)", "Remove Tap repository \(repo) (brew untap)"),
+            arguments: ["untap", repo]
         )
     }
 
@@ -1661,7 +2362,10 @@ public final class BrewStore: ObservableObject {
         // Unified state refresh once the entire taskQueue finishes or stops
         await refreshInstalled()
         await scanOrphanFormulae()
+        await refreshServices()
+        await refreshTaps()
         scanCachedDownloads()
+        await scanAppLeftovers()
         if needsCatalogRebuild {
             await refreshCatalog(forceRebuild: true)
         }

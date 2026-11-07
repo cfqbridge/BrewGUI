@@ -6,7 +6,7 @@ public actor BrewCatalogService {
     private init() {}
 
     private var cacheFileURL: URL? {
-        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v2.json")
+        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v3.json")
     }
 
     public func loadCatalog(forceRebuild: Bool = false) async throws -> [CatalogEntry] {
@@ -25,8 +25,9 @@ public actor BrewCatalogService {
 
         let entries = try await buildCatalogFromHomebrewCache()
         if let url = cacheFileURL, !entries.isEmpty {
-            let legacyURL = url.deletingLastPathComponent().appendingPathComponent("catalog_index.json")
-            try? FileManager.default.removeItem(at: legacyURL)
+            let dir = url.deletingLastPathComponent()
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index.json"))
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v2.json"))
             let index = CatalogIndex(generatedAt: Date(), entries: entries)
             if let encoded = try? JSONEncoder().encode(index) {
                 try? encoded.write(to: url, options: .atomic)
@@ -108,12 +109,11 @@ public actor BrewCatalogService {
                 let downloadURL = (info["url_args"] as? [Any])?.first as? String
 
                 var appBundles: [String] = []
+                var zapPaths: [String] = []
                 if let rawArtifacts = info["raw_artifacts"] as? [[Any]] {
                     for artifact in rawArtifacts {
-                        if artifact.count >= 2,
-                           let kind = artifact[0] as? String,
-                           kind == ":app",
-                           let appList = artifact[1] as? [Any] {
+                        guard artifact.count >= 2, let kind = artifact[0] as? String else { continue }
+                        if kind == ":app", let appList = artifact[1] as? [Any] {
                             for item in appList {
                                 if let appName = item as? String {
                                     // Sometimes app path is "Subdir/Foo.app", take lastPathComponent for matching /Applications
@@ -121,6 +121,18 @@ public actor BrewCatalogService {
                                     if bundleName.hasSuffix(".app") {
                                         appBundles.append(bundleName)
                                     }
+                                }
+                            }
+                        } else if kind == ":zap", let zapDict = artifact[1] as? [String: Any] {
+                            for key in [":trash", ":delete"] {
+                                if let list = zapDict[key] as? [Any] {
+                                    for item in list {
+                                        if let p = item as? String, Self.isSafeUserLibraryZapPath(p) {
+                                            zapPaths.append(p)
+                                        }
+                                    }
+                                } else if let p = zapDict[key] as? String, Self.isSafeUserLibraryZapPath(p) {
+                                    zapPaths.append(p)
                                 }
                             }
                         }
@@ -136,7 +148,8 @@ public actor BrewCatalogService {
                         homepage: homepage,
                         version: version,
                         appBundles: appBundles,
-                        downloadURL: downloadURL
+                        downloadURL: downloadURL,
+                        zapTrashPaths: zapPaths.isEmpty ? nil : zapPaths
                     )
                 )
             }
@@ -190,5 +203,54 @@ public actor BrewCatalogService {
         }
 
         return results
+    }
+
+    private static let sharedVendorRoots: Set<String> = [
+        "~/library/application support/google",
+        "~/library/application support/microsoft",
+        "~/library/application support/apple",
+        "~/library/application support/adobe",
+        "~/library/application support/jetbrains",
+        "~/library/application support/mozilla",
+        "~/library/caches/google",
+        "~/library/caches/microsoft",
+        "~/library/caches/mozilla",
+        "~/library/caches/apple",
+        "~/library/logs/google",
+        "~/library/logs/microsoft",
+        "~/library/preferences/byhost"
+    ]
+
+    public static func isSafeUserLibraryZapPath(_ rawPath: String) -> Bool {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("~/Library/") else { return false }
+        if trimmed.contains("*") || trimmed.contains("?") || trimmed.contains("$") || trimmed.contains("..") {
+            return false
+        }
+        var normalized = trimmed
+        while normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        let lower = normalized.lowercased()
+        if sharedVendorRoots.contains(lower) {
+            return false
+        }
+        let rel = String(normalized.dropFirst("~/Library/".count))
+        let parts = rel.split(separator: "/")
+        guard parts.count >= 2 else { return false }
+        let allowedTopFolders: Set<String> = [
+            "Application Support",
+            "Caches",
+            "Preferences",
+            "Saved Application State",
+            "Containers",
+            "Group Containers",
+            "HTTPStorages",
+            "WebKit",
+            "Logs",
+            "Application Scripts"
+        ]
+        guard allowedTopFolders.contains(String(parts[0])) else { return false }
+        return true
     }
 }

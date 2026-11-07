@@ -20,11 +20,20 @@ public actor BrewCommandRunner {
     }
 
     private var activeProcess: Process?
+    private var activeMirror: BrewMirrorSource = .official
 
     private init() {}
 
     private func setActiveProcess(_ process: Process?) {
         self.activeProcess = process
+    }
+
+    public func setActiveMirror(_ mirror: BrewMirrorSource) {
+        self.activeMirror = mirror
+    }
+
+    public func currentActiveMirror() -> BrewMirrorSource {
+        self.activeMirror
     }
 
     /// Terminates the currently running streaming `brew` process along with all descendant `ruby`/`curl` child processes.
@@ -105,13 +114,40 @@ public actor BrewCommandRunner {
     public func ensureAskpassScript() throws -> String {
         let appSupport = try Self.appSupportDirectory()
         let scriptURL = appSupport.appendingPathComponent("brewgui-askpass.sh")
+        let dialogMsg = tr(
+            "BrewGUI 需要管理员权限以完成 Homebrew 操作，请输入您的 Mac 登录密码：",
+            "BrewGUI 需要管理員權限以完成 Homebrew 操作，請輸入您的 Mac 登入密碼：",
+            "BrewGUI requires administrator privileges to complete the Homebrew operation. Please enter your Mac login password:"
+        )
+        let dialogTitle = tr("BrewGUI 权限请求", "BrewGUI 權限請求", "BrewGUI Authorization")
+        let cancelBtn = tr("取消", "取消", "Cancel")
+        let okBtn = tr("好", "好", "OK")
         let scriptContent = """
         #!/bin/sh
-        /usr/bin/osascript -e 'Tell application "System Events" to display dialog "BrewGUI 需要管理员权限以完成 Homebrew 软件包操作，请输入您的登录密码：" default answer "" with hidden answer with title "BrewGUI 权限请求" buttons {"取消", "好"} default button "好"' -e 'text returned of result' 2>/dev/null
+        /usr/bin/osascript -e 'Tell application "System Events" to display dialog "\(dialogMsg)" default answer "" with hidden answer with title "\(dialogTitle)" buttons {"\(cancelBtn)", "\(okBtn)"} default button "\(okBtn)"' -e 'text returned of result' 2>/dev/null
         """
         try scriptContent.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         return scriptURL.path
+    }
+
+    private func buildProcessEnvironment(askpassPath: String?, allowAutoUpdate: Bool, extraEnv: [String: String] = [:]) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env["HOMEBREW_NO_COLOR"] = "1"
+        if !allowAutoUpdate {
+            env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
+        }
+        if let askpassPath {
+            env["SUDO_ASKPASS"] = askpassPath
+        }
+        for (k, v) in activeMirror.environmentVariables {
+            env[k] = v
+        }
+        for (k, v) in extraEnv {
+            env[k] = v
+        }
+        return env
     }
 
     public static func appSupportDirectory() throws -> URL {
@@ -128,22 +164,13 @@ public actor BrewCommandRunner {
     public func runCapture(arguments: [String], allowAutoUpdate: Bool = false) async throws -> (stdout: Data, stderr: String, exitCode: Int32) {
         let brewPath = self.brewExecutablePath
         let askpassPath = try? ensureAskpassScript()
+        let env = buildProcessEnvironment(askpassPath: askpassPath, allowAutoUpdate: allowAutoUpdate)
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: brewPath)
                 process.arguments = arguments
-
-                var env = ProcessInfo.processInfo.environment
-                env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-                env["HOMEBREW_NO_COLOR"] = "1"
-                if !allowAutoUpdate {
-                    env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
-                }
-                if let askpassPath {
-                    env["SUDO_ASKPASS"] = askpassPath
-                }
                 process.environment = env
 
                 let outPipe = Pipe()
@@ -173,23 +200,28 @@ public actor BrewCommandRunner {
     ) async throws -> Int32 {
         let brewPath = self.brewExecutablePath
         let askpassPath = try? ensureAskpassScript()
+        let env = buildProcessEnvironment(askpassPath: askpassPath, allowAutoUpdate: allowAutoUpdate)
+        return try await runExecutableStreaming(
+            executablePath: brewPath,
+            arguments: arguments,
+            environment: env,
+            onOutput: onOutput
+        )
+    }
 
+    /// Run an arbitrary executable (e.g. `/bin/bash` for the in-app Homebrew installer) with live streaming output and process-tree cancellation support
+    public func runExecutableStreaming(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String],
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async throws -> Int32 {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
-                process.executableURL = URL(fileURLWithPath: brewPath)
+                process.executableURL = URL(fileURLWithPath: executablePath)
                 process.arguments = arguments
-
-                var env = ProcessInfo.processInfo.environment
-                env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-                env["HOMEBREW_NO_COLOR"] = "1"
-                if !allowAutoUpdate {
-                    env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
-                }
-                if let askpassPath {
-                    env["SUDO_ASKPASS"] = askpassPath
-                }
-                process.environment = env
+                process.environment = environment
 
                 let pipe = Pipe()
                 process.standardOutput = pipe
