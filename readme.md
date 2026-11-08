@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.0.261107-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.1.261108-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -77,7 +77,7 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 
 - **操作系统**: macOS 14.0 (Sonoma) 或更高版本
 - **硬件架构**: Apple Silicon (M1/M2/M3/M4 系列芯片)
-- **依赖环境**: 系统已安装 [Homebrew](https://brew.sh/)（默认路径 `/opt/homebrew`；若未安装，BrewGUI v2.0 内置免终端图形化一键安装向导，支持中科大/清华国内加速源自动部署）
+- **依赖环境**: 系统已安装 [Homebrew](https://brew.sh/)（核心命令行工具：[Homebrew/brew](https://github.com/Homebrew/brew)，软件源仓库：[homebrew-core](https://github.com/Homebrew/homebrew-core) 与 [homebrew-cask](https://github.com/Homebrew/homebrew-cask)；默认路径 `/opt/homebrew`；若未安装，BrewGUI 内置免终端图形化一键安装向导，支持中科大/清华国内加速源自动部署）
 
 ---
 
@@ -127,6 +127,17 @@ open dist/BrewGUI.app
     ├── dmg_bg_option_c.png     # DMG 视网膜安装背景图
     └── dmg_DS_Store            # DMG 窗口布局与背景绑定模板 (供 GitHub Actions 使用)
 ```
+
+---
+
+## 🔗 关联项目与致谢
+
+BrewGUI 是构建在庞大而优秀的 Homebrew 生态之上的图形客户端工具。由衷感谢 Homebrew 维护团队与全球开源贡献者的持续付出：
+
+- **官方网站**: [https://brew.sh/](https://brew.sh/)
+- **Homebrew Core CLI 源码**: [Homebrew/brew](https://github.com/Homebrew/brew) — macOS（及 Linux）不可或缺的包管理器核心命令行工具。
+- **Homebrew Formulae 核心软件仓库**: [Homebrew/homebrew-core](https://github.com/Homebrew/homebrew-core) — 汇集上万个开源命令行工具与依赖库。
+- **Homebrew Casks 桌面应用仓库**: [Homebrew/homebrew-cask](https://github.com/Homebrew/homebrew-cask) — 汇集数千款主流 macOS 桌面应用程序。
 
 ---
 

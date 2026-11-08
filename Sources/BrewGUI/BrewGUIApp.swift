@@ -813,7 +813,7 @@ public struct BrewMissingGuideView: View {
     public static func launchInstallInTerminal(mirror: BrewMirrorSource = .ustc) {
         // Use a temporary .command file opened via NSWorkspace so macOS launches Terminal.app directly without requiring AppleEvents Automation TCC permission
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("install_homebrew.command")
-        let envExports = mirror.environmentVariables.map { "export \($0.key)=\"\($0.value)\"" }.joined(separator: "\n")
+        let envExports = mirror.installEnvironmentVariables.map { "export \($0.key)=\"\($0.value)\"" }.joined(separator: "\n")
         let scriptURL = mirror.installScriptURLString
         let scriptContent = """
         #!/bin/zsh
@@ -1436,6 +1436,89 @@ public struct BrewGUIApp: App {
             MainWindowView(store: store)
         }
         .defaultSize(width: 980, height: 640)
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button(tr("关于 BrewGUI", "關於 BrewGUI", "About BrewGUI")) {
+                    Self.showAboutPanel()
+                }
+            }
+            CommandGroup(replacing: .help) {
+                Button(tr("BrewGUI 帮助与图文指南", "BrewGUI 輔助說明與圖文指南", "BrewGUI Help & Guide")) {
+                    if let url = URL(string: "https://brewgui.uhsn.uk/features.html") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .keyboardShortcut("?", modifiers: .command)
+
+                Button(tr("访问 BrewGUI 官方网站", "造訪 BrewGUI 官方網站", "Visit BrewGUI Website")) {
+                    if let url = URL(string: "https://brewgui.uhsn.uk/") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+
+                Divider()
+
+                Button(tr("GitHub 开源仓库 (cfqbridge/BrewGUI)", "GitHub 開源倉庫 (cfqbridge/BrewGUI)", "GitHub Repository (cfqbridge/BrewGUI)")) {
+                    if let url = URL(string: "https://github.com/cfqbridge/BrewGUI") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    public static func showAboutPanel() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineSpacing = 3
+
+        let baseAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraph
+        ]
+        let credits = NSMutableAttributedString(
+            string: tr(
+                "原生 macOS 图形化 Homebrew 软件管家\n",
+                "原生 macOS 圖形化 Homebrew 軟體管家\n",
+                "Native macOS Graphical Homebrew Manager\n"
+            ),
+            attributes: baseAttrs
+        )
+
+        let linkFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let siteAttrs: [NSAttributedString.Key: Any] = [
+            .font: linkFont,
+            .link: URL(string: "https://brewgui.uhsn.uk/")!,
+            .paragraphStyle: paragraph
+        ]
+        let sepAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .paragraphStyle: paragraph
+        ]
+        let guideAttrs: [NSAttributedString.Key: Any] = [
+            .font: linkFont,
+            .link: URL(string: "https://brewgui.uhsn.uk/features.html")!,
+            .paragraphStyle: paragraph
+        ]
+        let githubAttrs: [NSAttributedString.Key: Any] = [
+            .font: linkFont,
+            .link: URL(string: "https://github.com/cfqbridge/BrewGUI")!,
+            .paragraphStyle: paragraph
+        ]
+
+        credits.append(NSAttributedString(string: tr("官方网站", "官方網站", "Official Website"), attributes: siteAttrs))
+        credits.append(NSAttributedString(string: "  ·  ", attributes: sepAttrs))
+        credits.append(NSAttributedString(string: tr("图文使用指南", "圖文使用指南", "User Guide"), attributes: guideAttrs))
+        credits.append(NSAttributedString(string: "  ·  ", attributes: sepAttrs))
+        credits.append(NSAttributedString(string: "GitHub", attributes: githubAttrs))
+
+        NSApp.activate(ignoringOtherApps: true)
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .credits: credits
+        ])
     }
 
     public static func renderTransparentSquircleIcon(srcPath: String, dstPath: String) {

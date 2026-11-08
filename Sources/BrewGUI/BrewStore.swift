@@ -357,9 +357,9 @@ public final class BrewStore: ObservableObject {
             UserDefaults.standard.set(now, forKey: "BrewGUI.lastAutoUpdateTimestamp")
             let stamp = Self.dateTimeFormatter.string(from: Date())
             BrewCommandRunner.appendToDiskLog("\n[\(stamp)] [AutoUpdate] Triggered scheduled brew update (interval: \(autoUpdateInterval.label))\n")
-            checkUpdates(expandDrawer: false)
             Task {
                 await checkForAppUpdate(userInitiated: false)
+                checkUpdates(expandDrawer: false)
             }
         }
     }
@@ -560,7 +560,7 @@ public final class BrewStore: ObservableObject {
                 var installEnv = authEnv
                 installEnv["NONINTERACTIVE"] = "1"
                 installEnv["CI"] = "1"
-                for (k, v) in activeMirror.environmentVariables {
+                for (k, v) in activeMirror.installEnvironmentVariables {
                     installEnv[k] = v
                 }
 
@@ -1523,7 +1523,7 @@ public final class BrewStore: ObservableObject {
 
     public func runCleanupAllCaches() {
         enqueueTask(
-            title: tr("清理全部下载缓存与旧版本 (brew cleanup --prune=all)", "清理全部下載快取與舊版本 (brew cleanup --prune=all)", "Clean all download caches & old versions (brew cleanup --prune=all)"),
+            title: tr("清理全部下载缓存与旧版本", "清理全部下載快取與舊版本", "Clean all download caches & old versions"),
             arguments: ["cleanup", "--prune=all"]
         )
     }
@@ -1556,7 +1556,7 @@ public final class BrewStore: ObservableObject {
 
     public func runAutoremoveOrphans() {
         enqueueTask(
-            title: tr("清理无用孤儿依赖 (brew autoremove)", "清理無用孤兒依賴 (brew autoremove)", "Remove unused orphan dependencies (brew autoremove)"),
+            title: tr("清理无用孤儿依赖", "清理無用孤兒依賴", "Remove unused orphan dependencies"),
             arguments: ["autoremove"]
         )
     }
@@ -1743,39 +1743,73 @@ public final class BrewStore: ObservableObject {
         let selected = appLeftovers.filter(\.isSelected)
         guard !selected.isEmpty else { return }
 
-        let fm = FileManager.default
-        var cleanedCount = 0
-        var freedBytes: Int64 = 0
-        let stamp = Self.dateTimeFormatter.string(from: Date())
+        Task {
+            let fm = FileManager.default
+            var cleanedCount = 0
+            var freedBytes: Int64 = 0
+            var needsPrivilegedRemoval: [AppLeftoverItem] = []
+            let stamp = Self.dateTimeFormatter.string(from: Date())
 
-        for item in selected {
-            let url = URL(fileURLWithPath: item.fullPath)
-            guard fm.fileExists(atPath: item.fullPath) else { continue }
-            do {
-                if moveToTrash {
-                    try fm.trashItem(at: url, resultingItemURL: nil)
-                } else {
-                    try fm.removeItem(at: url)
-                }
-                cleanedCount += 1
-                freedBytes += item.sizeBytes
-            } catch {
-                // Fallback to removeItem if trashItem fails on specific volumes
-                if moveToTrash, (try? fm.removeItem(at: url)) != nil {
+            for item in selected {
+                let url = URL(fileURLWithPath: item.fullPath)
+                guard fm.fileExists(atPath: item.fullPath) else { continue }
+                do {
+                    if moveToTrash {
+                        try fm.trashItem(at: url, resultingItemURL: nil)
+                    } else {
+                        try fm.removeItem(at: url)
+                    }
                     cleanedCount += 1
                     freedBytes += item.sizeBytes
-                } else {
-                    appendLog("[\(stamp)] [Leftovers] Failed to remove \(item.displayPath): \(error.localizedDescription)\n")
+                } catch {
+                    // 1. If moving to Trash failed via FileManager, try delegating to Finder via NSWorkspace.recycle
+                    if moveToTrash {
+                        _ = try? await NSWorkspace.shared.recycle([url])
+                    }
+                    if !fm.fileExists(atPath: item.fullPath) {
+                        cleanedCount += 1
+                        freedBytes += item.sizeBytes
+                    } else if (try? fm.removeItem(at: url)) != nil {
+                        cleanedCount += 1
+                        freedBytes += item.sizeBytes
+                    } else {
+                        // 2. Likely a root:admin-owned folder created by a .pkg installer (e.g. Topaz Labs LLC)
+                        needsPrivilegedRemoval.append(item)
+                    }
                 }
             }
-        }
 
-        let freedStr = AppConstants.formatBytes(freedBytes)
-        let modeLabel = moveToTrash
-            ? tr("已移至废纸篓", "已移至垃圾桶", "Moved to Trash")
-            : tr("已彻底删除", "已徹底刪除", "Permanently deleted")
-        appendLog("\n[\(stamp)] 🧹 \(modeLabel): \(cleanedCount) \(tr("项已卸载软件残留", "項已解除安裝軟體殘留", "uninstalled app leftovers")) (\(freedStr))\n")
-        Task {
+            if !needsPrivilegedRemoval.isEmpty {
+                if let askpassPath = try? await BrewCommandRunner.shared.ensureAskpassScript() {
+                    var env = ProcessInfo.processInfo.environment
+                    env["SUDO_ASKPASS"] = askpassPath
+                    let paths = needsPrivilegedRemoval.map(\.fullPath)
+                    let exitCode = (try? await BrewCommandRunner.shared.runExecutableStreaming(
+                        executablePath: "/usr/bin/sudo",
+                        arguments: ["-A", "/bin/rm", "-rf"] + paths,
+                        environment: env,
+                        onOutput: { _ in }
+                    )) ?? -1
+                    for item in needsPrivilegedRemoval {
+                        if !fm.fileExists(atPath: item.fullPath) {
+                            cleanedCount += 1
+                            freedBytes += item.sizeBytes
+                        } else {
+                            appendLog("[\(stamp)] [Leftovers] Failed to remove \(item.displayPath) (sudo exit=\(exitCode))\n")
+                        }
+                    }
+                } else {
+                    for item in needsPrivilegedRemoval {
+                        appendLog("[\(stamp)] [Leftovers] Failed to remove \(item.displayPath): Permission denied\n")
+                    }
+                }
+            }
+
+            let freedStr = AppConstants.formatBytes(freedBytes)
+            let modeLabel = moveToTrash
+                ? tr("已移至废纸篓", "已移至垃圾桶", "Moved to Trash")
+                : tr("已彻底删除", "已徹底刪除", "Permanently deleted")
+            appendLog("\n[\(stamp)] 🧹 \(modeLabel): \(cleanedCount) \(tr("项已卸载软件残留", "項已解除安裝軟體殘留", "uninstalled app leftovers")) (\(freedStr))\n")
             await scanAppLeftovers()
         }
     }
@@ -1818,7 +1852,7 @@ public final class BrewStore: ObservableObject {
             }
         }()
         enqueueTask(
-            title: "\(actionTitle): \(service.name) (brew services \(action) \(service.name))",
+            title: "\(actionTitle): \(service.name)",
             arguments: ["services", action, service.name]
         )
     }
@@ -1889,14 +1923,14 @@ public final class BrewStore: ObservableObject {
         guard !repo.isEmpty, repo.contains("/") else { return }
         newTapInput = ""
         enqueueTask(
-            title: tr("添加软件源仓库 \(repo) (brew tap)", "新增軟體源倉庫 \(repo) (brew tap)", "Add Tap repository \(repo) (brew tap)"),
+            title: tr("添加软件源仓库 \(repo)", "新增軟體源倉庫 \(repo)", "Add Tap repository \(repo)"),
             arguments: ["tap", repo]
         )
     }
 
     public func removeTap(_ repo: String) {
         enqueueTask(
-            title: tr("移除软件源仓库 \(repo) (brew untap)", "移除軟體源倉庫 \(repo) (brew untap)", "Remove Tap repository \(repo) (brew untap)"),
+            title: tr("移除软件源仓库 \(repo)", "移除軟體源倉庫 \(repo)", "Remove Tap repository \(repo)"),
             arguments: ["untap", repo]
         )
     }
@@ -1906,7 +1940,7 @@ public final class BrewStore: ObservableObject {
     public func checkUpdates(expandDrawer: Bool = true) {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "BrewGUI.lastAutoUpdateTimestamp")
         enqueueTask(
-            title: tr("检查更新 (brew update)", "檢查更新 (brew update)", "Check for updates (brew update)"),
+            title: tr("检查更新", "檢查更新", "Check for updates"),
             arguments: ["update"],
             allowAutoUpdate: true,
             rebuildCatalogAfter: true,
@@ -1945,7 +1979,7 @@ public final class BrewStore: ObservableObject {
         // Fallback if no local outdated flags were set when user explicitly triggered upgradeAll
         if mismatchedCasks.isEmpty && outdatedFormulae.isEmpty && outdatedCasks.isEmpty {
             enqueueTask(
-                title: tr("升级全部可更新包 (brew upgrade)", "升級全部可更新套件 (brew upgrade)", "Upgrade all outdated packages (brew upgrade)"),
+                title: tr("升级全部可更新包", "升級全部可更新套件", "Upgrade all outdated packages"),
                 arguments: ["upgrade"]
             )
         }

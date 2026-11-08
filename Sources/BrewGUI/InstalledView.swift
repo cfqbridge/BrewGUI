@@ -90,7 +90,7 @@ public struct InstalledView: View {
                     Button {
                         store.checkUpdates()
                     } label: {
-                        Label(tr("检查更新 (update)", "檢查更新 (update)", "Check Updates (update)"), systemImage: "icloud.and.arrow.down")
+                        Label(tr("检查更新", "檢查更新", "Check Updates"), systemImage: "icloud.and.arrow.down")
                     }
                     .buttonStyle(.bordered)
 
@@ -104,7 +104,7 @@ public struct InstalledView: View {
                             )
                         } else {
                             Label(
-                                tr("全部升级 (upgrade)", "全部升級 (upgrade)", "Upgrade All (upgrade)"),
+                                tr("全部升级", "全部升級", "Upgrade All"),
                                 systemImage: "arrow.up.circle"
                             )
                         }

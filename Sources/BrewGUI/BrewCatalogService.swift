@@ -6,7 +6,7 @@ public actor BrewCatalogService {
     private init() {}
 
     private var cacheFileURL: URL? {
-        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v3.json")
+        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v4.json")
     }
 
     public func loadCatalog(forceRebuild: Bool = false) async throws -> [CatalogEntry] {
@@ -28,6 +28,7 @@ public actor BrewCatalogService {
             let dir = url.deletingLastPathComponent()
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index.json"))
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v2.json"))
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v3.json"))
             let index = CatalogIndex(generatedAt: Date(), entries: entries)
             if let encoded = try? JSONEncoder().encode(index) {
                 try? encoded.write(to: url, options: .atomic)
@@ -212,6 +213,7 @@ public actor BrewCatalogService {
         "~/library/application support/adobe",
         "~/library/application support/jetbrains",
         "~/library/application support/mozilla",
+        "~/library/application support/clouddocs",
         "~/library/caches/google",
         "~/library/caches/microsoft",
         "~/library/caches/mozilla",
@@ -232,7 +234,7 @@ public actor BrewCatalogService {
             normalized.removeLast()
         }
         let lower = normalized.lowercased()
-        if sharedVendorRoots.contains(lower) {
+        if sharedVendorRoots.contains(lower) || lower.contains("/clouddocs/") || lower.hasSuffix("/clouddocs") {
             return false
         }
         let rel = String(normalized.dropFirst("~/Library/".count))
@@ -243,8 +245,6 @@ public actor BrewCatalogService {
             "Caches",
             "Preferences",
             "Saved Application State",
-            "Containers",
-            "Group Containers",
             "HTTPStorages",
             "WebKit",
             "Logs",

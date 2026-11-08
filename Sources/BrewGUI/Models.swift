@@ -6,7 +6,7 @@ public enum AppConstants {
         if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
             return shortVer
         }
-        return "2.0.261107"
+        return "2.1.261108"
     }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
@@ -108,6 +108,23 @@ public enum BrewMirrorSource: String, CaseIterable, Identifiable, Sendable {
     }
 
     public var environmentVariables: [String: String] {
+        switch self {
+        case .ustc:
+            return [
+                "HOMEBREW_API_DOMAIN": "https://mirrors.ustc.edu.cn/homebrew-bottles/api",
+                "HOMEBREW_BOTTLE_DOMAIN": "https://mirrors.ustc.edu.cn/homebrew-bottles"
+            ]
+        case .tuna:
+            return [
+                "HOMEBREW_API_DOMAIN": "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api",
+                "HOMEBREW_BOTTLE_DOMAIN": "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
+            ]
+        case .auto, .official:
+            return [:]
+        }
+    }
+
+    public var installEnvironmentVariables: [String: String] {
         switch self {
         case .ustc:
             return [

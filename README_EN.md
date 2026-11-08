@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.0.261107-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.1.261108-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -77,7 +77,7 @@
 
 - **OS**: macOS 14.0 (Sonoma) or later
 - **Architecture**: Apple Silicon (`arm64` — M1 / M2 / M3 / M4)
-- **Prerequisite**: [Homebrew](https://brew.sh/) installed (default `/opt/homebrew`; if not installed, BrewGUI v2.0 includes an in-app terminal-free graphical installer with mirror speed testing and automatic `PATH` configuration)
+- **Prerequisite**: [Homebrew](https://brew.sh/) installed (Core CLI: [Homebrew/brew](https://github.com/Homebrew/brew), with [homebrew-core](https://github.com/Homebrew/homebrew-core) & [homebrew-cask](https://github.com/Homebrew/homebrew-cask); default `/opt/homebrew`; if not installed, BrewGUI includes an in-app terminal-free graphical installer with mirror speed testing and automatic `PATH` configuration)
 
 ---
 
@@ -123,6 +123,17 @@ open dist/BrewGUI.app
     ├── dmg_bg_option_c.png     # Retina DMG installer background
     └── dmg_DS_Store            # Pre-built Finder DMG layout template for CI
 ```
+
+---
+
+## 🔗 Related Projects & Acknowledgments
+
+BrewGUI is built upon the wonderful Homebrew ecosystem. Sincere gratitude to the Homebrew maintainers and global open-source contributors:
+
+- **Official Website**: [https://brew.sh/](https://brew.sh/)
+- **Homebrew Core CLI**: [Homebrew/brew](https://github.com/Homebrew/brew) — The missing package manager for macOS (and Linux).
+- **Homebrew Formulae (`homebrew-core`)**: [Homebrew/homebrew-core](https://github.com/Homebrew/homebrew-core) — Core repository for command-line tools and libraries.
+- **Homebrew Casks (`homebrew-cask`)**: [Homebrew/homebrew-cask](https://github.com/Homebrew/homebrew-cask) — Repository for macOS GUI applications, fonts, and plugins.
 
 ---
 
