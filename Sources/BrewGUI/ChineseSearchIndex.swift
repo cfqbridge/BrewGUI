@@ -53,6 +53,9 @@ public struct ChinesePackageMeta: Sendable {
     public let zhDesc: String
     public let keywords: String
     public let categories: Set<SearchCategoryPreset>
+    public let zhNameLower: String
+    public let zhDescLower: String
+    public let keywordsLower: String
 
     public init(
         zhName: String,
@@ -64,6 +67,25 @@ public struct ChinesePackageMeta: Sendable {
         self.zhDesc = zhDesc
         self.keywords = keywords
         self.categories = categories
+        self.zhNameLower = zhName.lowercased()
+        self.zhDescLower = zhDesc.lowercased()
+        self.keywordsLower = keywords.lowercased()
+    }
+}
+
+public struct EnglishKeywordRule: Sendable {
+    public let phrases: [String]
+    public let zhTag: String
+    public let zhTagLower: String
+    public let firstWord: String
+    public let category: SearchCategoryPreset?
+
+    public init(_ phrases: [String], _ zhTag: String, _ category: SearchCategoryPreset?) {
+        self.phrases = phrases
+        self.zhTag = zhTag
+        self.zhTagLower = zhTag.lowercased()
+        self.firstWord = zhTag.split(separator: " ").first.map(String.init) ?? zhTag
+        self.category = category
     }
 }
 
@@ -1120,45 +1142,51 @@ public enum ChineseSearchIndex {
     ]
 
     /// English functional phrase -> Chinese tags mapping for automatic indexing of all 16,500+ packages
-    private static let englishKeywordRules: [(phrases: [String], zhTag: String, category: SearchCategoryPreset?)] = [
-        (["screenshot", "screen capture", "screen-capture", "screen recording", "screen recorder", "screencast"], "截图 录屏 截屏", .screenshot),
-        (["archive", "unarchiver", "decompressor", "compression", "file archiver", "zip", "7-zip", "rar"], "解压 压缩 归档", .archive),
-        (["media player", "video player", "multimedia player", "audio player", "music player", "streaming media"], "播放器 视频 音乐 影音", .media),
-        (["video converter", "video transcoder", "video editor", "audio editor", "subtitle"], "视频转码 剪辑 字幕 音视频", .media),
-        (["translate", "translator", "translation", "dictionary", "ocr"], "翻译 词典 查词 OCR", .translate),
-        (["input method", "rime", "pinyin"], "输入法 拼音", .translate),
-        (["window manager", "window management", "window switcher", "tiling window"], "窗口管理 分屏 窗口切换", .productivity),
-        (["clipboard", "pasteboard"], "剪贴板 复制粘贴 历史记录", .productivity),
-        (["menu bar", "menubar", "status bar"], "菜单栏 状态栏工具", .productivity),
-        (["password manager", "password vault", "passkey"], "密码管理 密钥 安全", .productivity),
-        (["markdown", "note-taking", "knowledge base", "second brain"], "笔记 知识库 Markdown 文档", .productivity),
-        (["pdf reader", "pdf viewer", "e-book", "ebook", "epub"], "PDF 阅读器 电子书", .productivity),
-        (["terminal emulator", "shell", "command-line"], "终端 命令行 Shell", .dev),
-        (["code editor", "source code editor", "ide ", "integrated development"], "代码编辑器 开发 IDE 编程", .dev),
-        (["database", "mysql", "postgresql", "sqlite", "redis", "mongodb", "sql client"], "数据库 SQL 客户端", .dev),
-        (["container", "virtual machine", "virtualization", "docker", "kubernetes"], "容器 虚拟机 虚拟化", .dev),
-        (["git client", "version control"], "Git 版本控制 代码仓库", .dev),
-        (["api client", "http client", "graphql", "packet analyzer", "network debugging"], "API调试 抓包 网络分析", .dev),
-        (["large language model", "llm", "chatgpt", "openai", "claude", "ai assistant", "artificial intelligence", "machine learning"], "AI 大模型 人工智能", .ai),
-        (["proxy", "vpn", "shadowsocks", "clash", "v2ray", "wireguard", "mesh network"], "代理 网络 VPN 异地组网", .network),
-        (["download manager", "bittorrent", "torrent", "ftp client", "sftp"], "下载器 BT 磁力 文件传输", .network),
-        (["uninstaller", "disk space", "disk usage", "system cleaner", "system monitor", "hardware monitor", "battery", "fan control"], "卸载 清理 磁盘空间 系统监控", .cleanup)
+    public static let englishKeywordRules: [EnglishKeywordRule] = [
+        .init(["screenshot", "screen capture", "screen-capture", "screen recording", "screen recorder", "screencast"], "截图 录屏 截屏", .screenshot),
+        .init(["archive", "unarchiver", "decompressor", "compression", "file archiver", "zip", "7-zip", "rar"], "解压 压缩 归档", .archive),
+        .init(["media player", "video player", "multimedia player", "audio player", "music player", "streaming media"], "播放器 视频 音乐 影音", .media),
+        .init(["video converter", "video transcoder", "video editor", "audio editor", "subtitle"], "视频转码 剪辑 字幕 音视频", .media),
+        .init(["translate", "translator", "translation", "dictionary", "ocr"], "翻译 词典 查词 OCR", .translate),
+        .init(["input method", "rime", "pinyin"], "输入法 拼音", .translate),
+        .init(["window manager", "window management", "window switcher", "tiling window"], "窗口管理 分屏 窗口切换", .productivity),
+        .init(["clipboard", "pasteboard"], "剪贴板 复制粘贴 历史记录", .productivity),
+        .init(["menu bar", "menubar", "status bar"], "菜单栏 状态栏工具", .productivity),
+        .init(["password manager", "password vault", "passkey"], "密码管理 密钥 安全", .productivity),
+        .init(["markdown", "note-taking", "knowledge base", "second brain"], "笔记 知识库 Markdown 文档", .productivity),
+        .init(["pdf reader", "pdf viewer", "e-book", "ebook", "epub"], "PDF 阅读器 电子书", .productivity),
+        .init(["terminal emulator", "shell", "command-line"], "终端 命令行 Shell", .dev),
+        .init(["code editor", "source code editor", "ide ", "integrated development"], "代码编辑器 开发 IDE 编程", .dev),
+        .init(["database", "mysql", "postgresql", "sqlite", "redis", "mongodb", "sql client"], "数据库 SQL 客户端", .dev),
+        .init(["container", "virtual machine", "virtualization", "docker", "kubernetes"], "容器 虚拟机 虚拟化", .dev),
+        .init(["git client", "version control"], "Git 版本控制 代码仓库", .dev),
+        .init(["api client", "http client", "graphql", "packet analyzer", "network debugging"], "API调试 抓包 网络分析", .dev),
+        .init(["large language model", "llm", "chatgpt", "openai", "claude", "ai assistant", "artificial intelligence", "machine learning"], "AI 大模型 人工智能", .ai),
+        .init(["proxy", "vpn", "shadowsocks", "clash", "v2ray", "wireguard", "mesh network"], "代理 网络 VPN 异地组网", .network),
+        .init(["download manager", "bittorrent", "torrent", "ftp client", "sftp"], "下载器 BT 磁力 文件传输", .network),
+        .init(["uninstaller", "disk space", "disk usage", "system cleaner", "system monitor", "hardware monitor", "battery", "fan control"], "卸载 清理 磁盘空间 系统监控", .cleanup)
     ]
 
     public static func meta(for token: String) -> ChinesePackageMeta? {
         curated[token.lowercased()]
     }
 
+    /// Pre-filter English functional rules matching `queryLower` once outside the 16,500-entry loop
+    public static func matchingEnglishRules(for queryLower: String) -> [EnglishKeywordRule] {
+        guard !queryLower.isEmpty else { return [] }
+        return englishKeywordRules.filter { $0.zhTagLower.contains(queryLower) }
+    }
+
     /// Returns a concise Chinese title or functional tag badge for display in SearchCatalogRow
     public static func displayBadge(for entry: CatalogEntry) -> String? {
-        guard let m = curated[entry.name.lowercased()] else { return nil }
+        guard let m = curated[entry.nameLower] else { return nil }
         // If displayName already contains Chinese characters, skip redundant badge
-        if entry.displayName.range(of: "\\p{Han}", options: .regularExpression) != nil {
+        if entry.hasChineseInDisplay {
             return nil
         }
         var concise = m.zhName
-        for prefix in [entry.displayName, entry.name] where !prefix.isEmpty {
-            if concise.lowercased().hasPrefix(prefix.lowercased() + " ") {
+        for (prefix, prefixLower) in [(entry.displayName, entry.displayLower), (entry.name, entry.nameLower)] where !prefix.isEmpty {
+            if m.zhNameLower.hasPrefix(prefixLower + " ") {
                 concise = String(concise.dropFirst(prefix.count + 1)).trimmingCharacters(in: .whitespaces)
                 break
             }
@@ -1171,15 +1199,13 @@ public enum ChineseSearchIndex {
         guard AppLanguage.current.resolved != .en else {
             return entry.desc
         }
-        // If entry.desc already contains Chinese characters, return it directly without duplicating
-        let hasChineseInDesc = (entry.desc.range(of: "\\p{Han}", options: .regularExpression) != nil)
-        if let m = curated[entry.name.lowercased()] {
-            if entry.desc.isEmpty || hasChineseInDesc {
+        if let m = curated[entry.nameLower] {
+            if entry.desc.isEmpty || entry.hasChineseInDesc {
                 return m.zhDesc
             }
             return "\(m.zhDesc) · \(entry.desc)"
         }
-        if hasChineseInDesc {
+        if entry.hasChineseInDesc {
             return entry.desc
         }
         let tags = inferredChineseTags(for: entry)
@@ -1191,13 +1217,11 @@ public enum ChineseSearchIndex {
     }
 
     public static func inferredChineseTags(for entry: CatalogEntry) -> [String] {
-        let haystack = "\(entry.name) \(entry.displayName) \(entry.desc)".lowercased()
+        let haystack = entry.searchHaystackLower
         var matched: [String] = []
         for rule in englishKeywordRules {
             if rule.phrases.contains(where: { haystack.contains($0) }) {
-                if let firstWord = rule.zhTag.split(separator: " ").first {
-                    matched.append(String(firstWord))
-                }
+                matched.append(rule.firstWord)
                 if matched.count >= 2 { break }
             }
         }
@@ -1207,14 +1231,13 @@ public enum ChineseSearchIndex {
     /// Checks whether a CatalogEntry belongs to the given category preset
     public static func matchesCategory(_ entry: CatalogEntry, category: SearchCategoryPreset) -> Bool {
         guard category != .all else { return true }
-        let lowerName = entry.name.lowercased()
-        if let m = curated[lowerName], m.categories.contains(category) {
+        if let m = curated[entry.nameLower], m.categories.contains(category) {
             return true
         }
         if category == .essentials {
             return false
         }
-        let haystack = "\(lowerName) \(entry.displayName.lowercased()) \(entry.desc.lowercased())"
+        let haystack = entry.searchHaystackLower
         for rule in englishKeywordRules where rule.category == category {
             if rule.phrases.contains(where: { haystack.contains($0) }) {
                 return true
@@ -1230,21 +1253,19 @@ public enum ChineseSearchIndex {
     /// 2 = name/displayName prefix match
     /// 3 = name/displayName contains match
     /// 4 = English desc or inferred Chinese tag match
-    public static func matchRank(for entry: CatalogEntry, queryLower: String) -> Int? {
-        let nameLower = entry.name.lowercased()
-        let displayLower = entry.displayName.lowercased()
-        let descLower = entry.desc.lowercased()
-        let curatedMeta = curated[nameLower]
+    public static func matchRank(for entry: CatalogEntry, queryLower: String, activeRules: [EnglishKeywordRule]? = nil) -> Int? {
+        let nameLower = entry.nameLower
+        let displayLower = entry.displayLower
+        let descLower = entry.descLower
 
         if nameLower == queryLower || displayLower == queryLower {
             return 0
         }
-        if let m = curatedMeta {
-            let zhNameLower = m.zhName.lowercased()
-            if zhNameLower == queryLower {
+        if let m = curated[nameLower] {
+            if m.zhNameLower == queryLower {
                 return 0
             }
-            if zhNameLower.contains(queryLower) || m.keywords.lowercased().contains(queryLower) || m.zhDesc.lowercased().contains(queryLower) {
+            if m.zhNameLower.contains(queryLower) || m.keywordsLower.contains(queryLower) || m.zhDescLower.contains(queryLower) {
                 return 1
             }
         }
@@ -1258,10 +1279,11 @@ public enum ChineseSearchIndex {
             return 4
         }
 
-        // Check inferred Chinese functional rules (so searching "截图", "解压", "播放器", "翻译", "终端", "数据库", "代理", "卸载" also finds uncurated packages whose English description matches!)
-        let haystack = "\(nameLower) \(displayLower) \(descLower)"
-        for rule in englishKeywordRules {
-            if rule.zhTag.lowercased().contains(queryLower) {
+        // Check pre-filtered Chinese functional rules (zero inner-loop overhead when query does not match any zhTag)
+        let rulesToCheck = activeRules ?? matchingEnglishRules(for: queryLower)
+        if !rulesToCheck.isEmpty {
+            let haystack = entry.searchHaystackLower
+            for rule in rulesToCheck {
                 if rule.phrases.contains(where: { haystack.contains($0) }) {
                     return 4
                 }

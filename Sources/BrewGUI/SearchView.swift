@@ -30,68 +30,6 @@ public struct SearchView: View {
         self.store = store
     }
 
-    private var searchResults: [CatalogEntry] {
-        let trimmed = store.catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let activeCategory = store.selectedSearchCategory
-        let pool = store.catalogEntries.filter { entry in
-            switch store.catalogTypeFilter {
-            case .all: break
-            case .formulae: if entry.type != .formula { return false }
-            case .casks: if entry.type != .cask { return false }
-            case .adoptable: return false
-            }
-            if activeCategory != .all {
-                return ChineseSearchIndex.matchesCategory(entry, category: activeCategory)
-            }
-            return true
-        }
-
-        guard !trimmed.isEmpty else {
-            if activeCategory != .all {
-                // Prioritize curated items when browsing a category preset
-                let curatedList = pool.filter { ChineseSearchIndex.meta(for: $0.name) != nil }
-                let others = pool.filter { ChineseSearchIndex.meta(for: $0.name) == nil }
-                return Array((curatedList + others).prefix(150))
-            }
-            return Array(pool.prefix(120))
-        }
-
-        var rank0: [CatalogEntry] = []
-        var rank1: [CatalogEntry] = []
-        var rank2: [CatalogEntry] = []
-        var rank3: [CatalogEntry] = []
-        var rank4: [CatalogEntry] = []
-
-        for entry in pool {
-            guard let r = ChineseSearchIndex.matchRank(for: entry, queryLower: trimmed) else { continue }
-            switch r {
-            case 0: rank0.append(entry)
-            case 1: rank1.append(entry)
-            case 2: rank2.append(entry)
-            case 3: rank3.append(entry)
-            default: rank4.append(entry)
-            }
-        }
-
-        let merged = rank0 + rank1 + rank2 + rank3 + rank4
-        return Array(merged.prefix(200))
-    }
-
-    private var filteredAdoptCandidates: [AdoptCandidate] {
-        let base = store.showIgnoredAdoptCandidates ? store.adoptCandidates : store.activeAdoptCandidates
-        let trimmed = store.catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return base }
-        return base.filter { item in
-            let zhMeta = ChineseSearchIndex.meta(for: item.caskToken)
-            return item.appName.lowercased().contains(trimmed)
-                || item.caskToken.lowercased().contains(trimmed)
-                || item.caskDisplayName.lowercased().contains(trimmed)
-                || item.desc.lowercased().contains(trimmed)
-                || (zhMeta?.zhName.lowercased().contains(trimmed) ?? false)
-                || (zhMeta?.keywords.lowercased().contains(trimmed) ?? false)
-        }
-    }
-
     public var body: some View {
         VStack(spacing: 0) {
             // Top Search Bar & Filter
@@ -212,11 +150,13 @@ public struct SearchView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
+                let resultCount = store.filteredCatalogEntries.count
+                let totalCount = store.catalogEntries.count
                 Text(
                     tr(
-                        "本地索引库共 \(store.catalogEntries.count) 个软件包 · 已内置中文别名与场景词典（显示前 \(searchResults.count) 条结果）",
-                        "本機索引庫共 \(store.catalogEntries.count) 個軟體套件 · 已內建中文別名與場景詞典（顯示前 \(searchResults.count) 筆結果）",
-                        "\(store.catalogEntries.count) packages indexed locally with bilingual alias & category tags (showing top \(searchResults.count) matches)"
+                        "本地索引库共 \(totalCount) 个软件包 · 已内置中文别名与场景词典（显示前 \(resultCount) 条结果）",
+                        "本機索引庫共 \(totalCount) 個軟體套件 · 已內建中文別名與場景詞典（顯示前 \(resultCount) 筆結果）",
+                        "\(totalCount) packages indexed locally with bilingual alias & category tags (showing top \(resultCount) matches)"
                     )
                 )
                 .font(.caption)
@@ -249,7 +189,7 @@ public struct SearchView: View {
 
         Divider()
 
-        if searchResults.isEmpty && !store.isLoadingCatalog {
+        if store.filteredCatalogEntries.isEmpty && !store.isLoadingCatalog {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 36))
@@ -260,13 +200,14 @@ public struct SearchView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(searchResults) { entry in
+            List(store.filteredCatalogEntries) { entry in
+                let adoptApp = store.adoptableAppName(for: entry)
                 SearchCatalogRow(
                     entry: entry,
                     installedPkg: store.installedPackage(for: entry),
-                    adoptableApp: store.adoptableAppName(for: entry),
-                    isLocalOlderThanCask: store.adoptCandidates.first(where: { $0.caskToken == entry.name })?.isLocalOlderThanCask ?? false,
-                    onInstall: { store.installCatalogEntry(entry, forceOverwrite: store.adoptableAppName(for: entry) != nil) },
+                    adoptableApp: adoptApp,
+                    isLocalOlderThanCask: store.adoptCandidate(for: entry.name)?.isLocalOlderThanCask ?? false,
+                    onInstall: { store.installCatalogEntry(entry, forceOverwrite: adoptApp != nil) },
                     onAdopt: { forceUpgrade in
                         store.adoptCask(
                             token: entry.name,
@@ -275,7 +216,8 @@ public struct SearchView: View {
                             forceOverwriteToUpgrade: forceUpgrade
                         )
                     },
-                    onIgnoreAdopt: { store.toggleIgnoreAdoptCandidate(caskToken: entry.name) }
+                    onIgnoreAdopt: { store.toggleIgnoreAdoptCandidate(caskToken: entry.name) },
+                    onSearchReplacement: { repl in store.catalogSearchQuery = repl }
                 )
                 .padding(.vertical, 4)
             }
@@ -362,7 +304,7 @@ public struct SearchView: View {
 
         Divider()
 
-        if filteredAdoptCandidates.isEmpty {
+        if store.filteredAdoptCandidatesList.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "checkmark.seal")
                     .font(.system(size: 40))
@@ -385,7 +327,7 @@ public struct SearchView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(filteredAdoptCandidates) { candidate in
+            List(store.filteredAdoptCandidatesList) { candidate in
                 AdoptCandidateRow(
                     candidate: candidate,
                     onAdoptOnly: {
@@ -423,6 +365,7 @@ private struct SearchCatalogRow: View {
     let onInstall: () -> Void
     let onAdopt: (Bool) -> Void
     let onIgnoreAdopt: () -> Void
+    let onSearchReplacement: (String) -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -430,6 +373,8 @@ private struct SearchCatalogRow: View {
                 HStack(spacing: 8) {
                     Text(entry.displayName)
                         .font(.system(.body, design: .default).weight(.semibold))
+                        .strikethrough(entry.isDisabled && installedPkg == nil)
+                        .foregroundStyle(entry.isDisabled && installedPkg == nil ? .secondary : .primary)
 
                     if entry.displayName != entry.name {
                         Text("(\(entry.name))")
@@ -439,7 +384,7 @@ private struct SearchCatalogRow: View {
 
                     if AppLanguage.current.resolved != .en,
                        let zhBadge = ChineseSearchIndex.displayBadge(for: entry),
-                       zhBadge.lowercased() != entry.displayName.lowercased() {
+                       zhBadge.lowercased() != entry.displayLower {
                         BadgeView(text: zhBadge, color: .orange)
                     }
 
@@ -447,6 +392,18 @@ private struct SearchCatalogRow: View {
                         text: entry.type.rawValue,
                         color: entry.type == .cask ? .purple : .blue
                     )
+
+                    if entry.isDisabled {
+                        BadgeView(
+                            text: tr("已禁用", "已停用", "Disabled"),
+                            color: .red
+                        )
+                    } else if entry.isDeprecated {
+                        BadgeView(
+                            text: tr("已弃用", "已棄用", "Deprecated"),
+                            color: .orange
+                        )
+                    }
 
                     if let installedPkg {
                         BadgeView(
@@ -467,6 +424,35 @@ private struct SearchCatalogRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+
+                if entry.isDisabled {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                        let datePart = entry.disableDate.map { " (\($0))" } ?? ""
+                        let reasonPart = entry.localizedLifecycleReason ?? tr("已被官方标记为不可用", "已被官方標記為不可用", "Disabled by Homebrew")
+                        let replPart = entry.replacementPackage.map { " · \(tr("推荐替代包", "推薦替代套件", "Replacement")): \($0)" } ?? ""
+                        Text("\(tr("Homebrew 已禁用此包安装", "Homebrew 已停用此套件安裝", "Disabled in Homebrew"))\(datePart)：\(reasonPart)\(replPart)")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.red)
+                } else if entry.isDeprecated {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .font(.caption2)
+                        let reasonPart = entry.localizedLifecycleReason ?? tr("即将停止维护", "即將停止維護", "Deprecated upstream")
+                        let replPart = entry.replacementPackage.map { " · \(tr("推荐替代包", "推薦替代套件", "Replacement")): \($0)" } ?? ""
+                        if let futureDisable = entry.disableDate, !futureDisable.isEmpty {
+                            Text("\(tr("将于 \(futureDisable) 禁用", "將於 \(futureDisable) 停用", "Will be disabled on \(futureDisable)"))：\(reasonPart)\(replPart)")
+                                .font(.caption)
+                        } else {
+                            let depDatePart = entry.deprecateDate.map { " (\($0))" } ?? ""
+                            Text("\(tr("已标记弃用", "已標記棄用", "Deprecated"))\(depDatePart)：\(reasonPart)\(replPart)")
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundStyle(.orange)
                 }
 
                 HStack(spacing: 12) {
@@ -552,7 +538,51 @@ private struct SearchCatalogRow: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help(tr("不再提示接管此应用", "不再提示接管此應用程式", "Do not suggest adopting this app"))
+                } else if entry.isDisabled {
+                    if let repl = entry.replacementPackage, !repl.isEmpty {
+                        Button {
+                            onSearchReplacement(repl)
+                        } label: {
+                            Label("\(tr("搜替代包", "搜尋替代套件", "Replacement")): \(repl)", systemImage: "arrow.right.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
+                        .controlSize(.small)
+                        .help(tr("搜索并查看官方推荐替代包 \(repl)", "搜尋並檢視官方推薦替代套件 \(repl)", "Search for recommended replacement package \(repl)"))
+                    }
+
+                    let fallbackURLString = !entry.homepage.isEmpty ? entry.homepage : (entry.downloadURL ?? "")
+                    if let url = URL(string: fallbackURLString), !fallbackURLString.isEmpty {
+                        Link(destination: url) {
+                            Label(tr("前往官网下载", "前往官網下載", "Get from Website"), systemImage: "arrow.up.right.square")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help(
+                            tr(
+                                "Homebrew 已禁用该包的命令安装（\(entry.localizedLifecycleReason ?? "")）。请前往官网或 GitHub Releases 手动下载安装（首次打开若遇拦截可在「系统设置 → 隐私与安全性」点击仍要打开）。",
+                                "Homebrew 已停用該套件的命令安裝（\(entry.localizedLifecycleReason ?? "")）。請前往官網或 GitHub Releases 手動下載安裝（首次開啟若遇攔截可在「系統設定 → 隱私權與安全性」點擊仍要打開）。",
+                                "Disabled in Homebrew (\(entry.localizedLifecycleReason ?? "")). Please download directly from the official website or GitHub Releases."
+                            )
+                        )
+                    } else {
+                        Label(tr("已禁用", "已停用", "Disabled"), systemImage: "nosign")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 8)
+                    }
                 } else {
+                    if let repl = entry.replacementPackage, !repl.isEmpty, entry.isDeprecated {
+                        Button {
+                            onSearchReplacement(repl)
+                        } label: {
+                            Text("\(tr("替代包", "替代套件", "Try")): \(repl)")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help(tr("查看推荐替代包 \(repl)", "檢視推薦替代套件 \(repl)", "Search replacement package \(repl)"))
+                    }
+
                     Button {
                         onInstall()
                     } label: {

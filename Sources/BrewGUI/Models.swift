@@ -6,7 +6,7 @@ public enum AppConstants {
         if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
             return shortVer
         }
-        return "2.1.261108"
+        return "2.2.261113"
     }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
@@ -553,6 +553,36 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
     public let appBundles: [String]
     public let downloadURL: String?
     public let zapTrashPaths: [String]?
+    public let disableDate: String?
+    public let disableReason: String?
+    public let deprecateDate: String?
+    public let deprecateReason: String?
+    public let replacementPackage: String?
+
+    // Precomputed in-memory search & display acceleration fields (excluded from disk JSON)
+    public let nameLower: String
+    public let displayLower: String
+    public let descLower: String
+    public let searchHaystackLower: String
+    public let hasChineseInDisplay: Bool
+    public let hasChineseInDesc: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case displayName
+        case type
+        case desc
+        case homepage
+        case version
+        case appBundles
+        case downloadURL
+        case zapTrashPaths
+        case disableDate
+        case disableReason
+        case deprecateDate
+        case deprecateReason
+        case replacementPackage
+    }
 
     public init(
         name: String,
@@ -563,7 +593,12 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         version: String,
         appBundles: [String],
         downloadURL: String? = nil,
-        zapTrashPaths: [String]? = nil
+        zapTrashPaths: [String]? = nil,
+        disableDate: String? = nil,
+        disableReason: String? = nil,
+        deprecateDate: String? = nil,
+        deprecateReason: String? = nil,
+        replacementPackage: String? = nil
     ) {
         self.name = name
         self.displayName = displayName
@@ -574,6 +609,133 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         self.appBundles = appBundles
         self.downloadURL = downloadURL
         self.zapTrashPaths = zapTrashPaths
+        self.disableDate = disableDate
+        self.disableReason = disableReason
+        self.deprecateDate = deprecateDate
+        self.deprecateReason = deprecateReason
+        self.replacementPackage = replacementPackage
+
+        let nLower = name.lowercased()
+        let dispLower = displayName.lowercased()
+        let dLower = desc.lowercased()
+        self.nameLower = nLower
+        self.displayLower = dispLower
+        self.descLower = dLower
+        self.searchHaystackLower = "\(nLower) \(dispLower) \(dLower)"
+        self.hasChineseInDisplay = Self.containsHanCharacters(displayName)
+        self.hasChineseInDesc = Self.containsHanCharacters(desc)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let name = try c.decode(String.self, forKey: .name)
+        let displayName = try c.decode(String.self, forKey: .displayName)
+        let type = try c.decode(PackageType.self, forKey: .type)
+        let desc = try c.decode(String.self, forKey: .desc)
+        let homepage = try c.decode(String.self, forKey: .homepage)
+        let version = try c.decode(String.self, forKey: .version)
+        let appBundles = try c.decode([String].self, forKey: .appBundles)
+        let downloadURL = try c.decodeIfPresent(String.self, forKey: .downloadURL)
+        let zapTrashPaths = try c.decodeIfPresent([String].self, forKey: .zapTrashPaths)
+        let disableDate = try c.decodeIfPresent(String.self, forKey: .disableDate)
+        let disableReason = try c.decodeIfPresent(String.self, forKey: .disableReason)
+        let deprecateDate = try c.decodeIfPresent(String.self, forKey: .deprecateDate)
+        let deprecateReason = try c.decodeIfPresent(String.self, forKey: .deprecateReason)
+        let replacementPackage = try c.decodeIfPresent(String.self, forKey: .replacementPackage)
+
+        self.init(
+            name: name,
+            displayName: displayName,
+            type: type,
+            desc: desc,
+            homepage: homepage,
+            version: version,
+            appBundles: appBundles,
+            downloadURL: downloadURL,
+            zapTrashPaths: zapTrashPaths,
+            disableDate: disableDate,
+            disableReason: disableReason,
+            deprecateDate: deprecateDate,
+            deprecateReason: deprecateReason,
+            replacementPackage: replacementPackage
+        )
+    }
+
+    public static func == (lhs: CatalogEntry, rhs: CatalogEntry) -> Bool {
+        lhs.type == rhs.type && lhs.name == rhs.name && lhs.version == rhs.version
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(type)
+        hasher.combine(name)
+    }
+
+    private static func containsHanCharacters(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            if (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static let todayISOString: String = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date())
+    }()
+
+    /// True when the package has a `disable_args` date on or before today (`brew install` will refuse with exit code 1)
+    public var isDisabled: Bool {
+        guard let d = disableDate, !d.isEmpty else { return false }
+        return d <= Self.todayISOString
+    }
+
+    /// True when the package is deprecated or scheduled to be disabled in the future
+    public var isDeprecated: Bool {
+        if isDisabled { return false }
+        if let d = disableDate, !d.isEmpty { return true }
+        if let dep = deprecateDate, !dep.isEmpty { return true }
+        return false
+    }
+
+    public var rawLifecycleReason: String? {
+        if isDisabled {
+            return disableReason ?? deprecateReason
+        }
+        return deprecateReason ?? disableReason
+    }
+
+    public var localizedLifecycleReason: String? {
+        guard let raw = rawLifecycleReason, !raw.isEmpty else { return nil }
+        switch raw {
+        case ":fails_gatekeeper_check":
+            return tr("未通过 macOS Gatekeeper 公证检查", "未通過 macOS Gatekeeper 公證檢查", "Does not pass macOS Gatekeeper check")
+        case ":unmaintained":
+            return tr("上游已停止维护", "上游已停止維護", "Unmaintained upstream")
+        case ":discontinued":
+            return tr("官方已停止开发或下架", "官方已停止開發或下架", "Discontinued upstream")
+        case ":repo_archived":
+            return tr("上游代码仓库已归档", "上游程式碼倉庫已封存", "Upstream repository archived")
+        case ":no_longer_available", ":repo_removed", ":unreachable":
+            return tr("上游下载源已失效或移除", "上游下載源已失效或移除", "Upstream source no longer available")
+        case ":moved_to_mas":
+            return tr("已迁移至 Mac App Store 分发", "已遷移至 Mac App Store 分發", "Moved to Mac App Store")
+        case ":no_longer_meets_criteria", ":unsupported":
+            return tr("不再符合 Homebrew 收录支持标准", "不再符合 Homebrew 收錄支援標準", "No longer meets Homebrew support criteria")
+        case ":does_not_build":
+            return tr("无法在当前系统编译构建", "無法在目前系統編譯建構", "Fails to build on current system")
+        case ":deprecated_upstream":
+            return tr("上游官方已标记弃用", "上游官方已標記棄用", "Deprecated upstream")
+        case ":versioned_formula":
+            return tr("属于特定旧版本分支 Formula", "屬於特定舊版本分支 Formula", "Versioned legacy formula")
+        case ":checksum_mismatch":
+            return tr("上游安装包校验和不一致", "上游安裝包校驗和不一致", "Upstream checksum mismatch")
+        default:
+            return raw.hasPrefix(":") ? String(raw.dropFirst()) : raw
+        }
     }
 }
 

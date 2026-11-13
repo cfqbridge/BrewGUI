@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-APP_VERSION="${APP_VERSION:-2.1.261108}"
+APP_VERSION="${APP_VERSION:-2.2.261113}"
 
 echo "==> 1. Compiling BrewGUI v$APP_VERSION (Release, arm64)..."
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/tmp/clang-module-cache}"

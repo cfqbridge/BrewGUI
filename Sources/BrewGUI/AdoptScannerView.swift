@@ -207,7 +207,9 @@ public struct BatchInstallView: View {
                             Button(tr("全选可安装项", "全選可安裝項", "Select All Installable")) {
                                 for idx in store.batchItems.indices {
                                     switch store.batchItems[idx].status {
-                                    case .readyToInstall, .readyToAdopt:
+                                    case .readyToInstall(let entry):
+                                        store.batchItems[idx].isSelected = !entry.isDisabled
+                                    case .readyToAdopt:
                                         store.batchItems[idx].isSelected = true
                                     case .alreadyInstalled, .notFound:
                                         store.batchItems[idx].isSelected = false
@@ -288,26 +290,38 @@ private struct BatchItemRow: View {
             switch item.status {
             case .readyToInstall(let entry):
                 Button {
-                    onToggleSelect()
+                    if !entry.isDisabled {
+                        onToggleSelect()
+                    }
                 } label: {
-                    Image(systemName: item.isSelected ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(item.isSelected ? Color.accentColor : .secondary)
+                    Image(systemName: entry.isDisabled ? "nosign" : (item.isSelected ? "checkmark.square.fill" : "square"))
+                        .foregroundStyle(entry.isDisabled ? .red : (item.isSelected ? Color.accentColor : .secondary))
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
+                .disabled(entry.isDisabled)
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(entry.displayName)
                             .font(.body.weight(.medium))
+                            .strikethrough(entry.isDisabled)
+                            .foregroundStyle(entry.isDisabled ? .secondary : .primary)
                         if entry.displayName != entry.name {
                             Text("(\(entry.name))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         BadgeView(text: entry.type.rawValue, color: entry.type == .cask ? .purple : .blue)
-                        BadgeView(text: "\(tr("可安装", "可安裝", "Ready")) \(entry.version)", color: .blue)
-                        if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
+                        if entry.isDisabled {
+                            BadgeView(text: tr("已禁用", "已停用", "Disabled"), color: .red)
+                        } else if entry.isDeprecated {
+                            BadgeView(text: tr("已弃用", "已棄用", "Deprecated"), color: .orange)
+                            BadgeView(text: "\(tr("可安装", "可安裝", "Ready")) \(entry.version)", color: .blue)
+                        } else {
+                            BadgeView(text: "\(tr("可安装", "可安裝", "Ready")) \(entry.version)", color: .blue)
+                        }
+                        if !entry.isDisabled, let sizeBytes = probedSizeBytes, sizeBytes > 0 {
                             let isLarge = sizeBytes >= 100 * 1024 * 1024
                             BadgeView(
                                 text: "📦 \(AppConstants.formatBytes(sizeBytes))",
@@ -315,7 +329,12 @@ private struct BatchItemRow: View {
                             )
                         }
                     }
-                    if !entry.desc.isEmpty {
+                    if entry.isDisabled {
+                        Text("\(tr("Homebrew 已禁用此包", "Homebrew 已停用此套件", "Disabled in Homebrew"))：\(entry.localizedLifecycleReason ?? "")")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                    } else if !entry.desc.isEmpty {
                         Text(entry.desc)
                             .font(.caption)
                             .foregroundStyle(.secondary)

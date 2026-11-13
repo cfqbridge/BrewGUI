@@ -6,7 +6,7 @@ public actor BrewCatalogService {
     private init() {}
 
     private var cacheFileURL: URL? {
-        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v4.json")
+        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v5.json")
     }
 
     public func loadCatalog(forceRebuild: Bool = false) async throws -> [CatalogEntry] {
@@ -29,6 +29,7 @@ public actor BrewCatalogService {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index.json"))
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v2.json"))
             try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v3.json"))
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v4.json"))
             let index = CatalogIndex(generatedAt: Date(), entries: entries)
             if let encoded = try? JSONEncoder().encode(index) {
                 try? encoded.write(to: url, options: .atomic)
@@ -85,6 +86,17 @@ public actor BrewCatalogService {
                 let homepage = (info["homepage"] as? String) ?? ""
                 let version = (info["stable_version"] as? String) ?? ""
                 let downloadURL = (info["stable_url_args"] as? [Any])?.first as? String
+                let disableArgs = info["disable_args"] as? [String: Any]
+                let deprecateArgs = info["deprecate_args"] as? [String: Any]
+                let disableDate = disableArgs?[":date"] as? String
+                let disableReason = disableArgs?[":because"] as? String
+                let deprecateDate = deprecateArgs?[":date"] as? String
+                let deprecateReason = deprecateArgs?[":because"] as? String
+                let replacement = (disableArgs?[":replacement_formula"] as? String)
+                    ?? (disableArgs?[":replacement_cask"] as? String)
+                    ?? (deprecateArgs?[":replacement_formula"] as? String)
+                    ?? (deprecateArgs?[":replacement_cask"] as? String)
+
                 results.append(
                     CatalogEntry(
                         name: name,
@@ -94,7 +106,12 @@ public actor BrewCatalogService {
                         homepage: homepage,
                         version: version,
                         appBundles: [],
-                        downloadURL: downloadURL
+                        downloadURL: downloadURL,
+                        disableDate: disableDate,
+                        disableReason: disableReason,
+                        deprecateDate: deprecateDate,
+                        deprecateReason: deprecateReason,
+                        replacementPackage: replacement
                     )
                 )
             }
@@ -108,6 +125,16 @@ public actor BrewCatalogService {
                 let names = (info["names"] as? [String]) ?? []
                 let displayName = names.first ?? token
                 let downloadURL = (info["url_args"] as? [Any])?.first as? String
+                let disableArgs = info["disable_args"] as? [String: Any]
+                let deprecateArgs = info["deprecate_args"] as? [String: Any]
+                let disableDate = disableArgs?[":date"] as? String
+                let disableReason = disableArgs?[":because"] as? String
+                let deprecateDate = deprecateArgs?[":date"] as? String
+                let deprecateReason = deprecateArgs?[":because"] as? String
+                let replacement = (disableArgs?[":replacement_cask"] as? String)
+                    ?? (disableArgs?[":replacement_formula"] as? String)
+                    ?? (deprecateArgs?[":replacement_cask"] as? String)
+                    ?? (deprecateArgs?[":replacement_formula"] as? String)
 
                 var appBundles: [String] = []
                 var zapPaths: [String] = []
@@ -150,7 +177,12 @@ public actor BrewCatalogService {
                         version: version,
                         appBundles: appBundles,
                         downloadURL: downloadURL,
-                        zapTrashPaths: zapPaths.isEmpty ? nil : zapPaths
+                        zapTrashPaths: zapPaths.isEmpty ? nil : zapPaths,
+                        disableDate: disableDate,
+                        disableReason: disableReason,
+                        deprecateDate: deprecateDate,
+                        deprecateReason: deprecateReason,
+                        replacementPackage: replacement
                     )
                 )
             }
@@ -234,7 +266,10 @@ public actor BrewCatalogService {
             normalized.removeLast()
         }
         let lower = normalized.lowercased()
-        if sharedVendorRoots.contains(lower) || lower.contains("/clouddocs/") || lower.hasSuffix("/clouddocs") {
+        if sharedVendorRoots.contains(lower)
+            || lower.contains("/clouddocs/")
+            || lower.hasSuffix("/clouddocs")
+            || lower.contains("/com.apple.sharedfilelist") {
             return false
         }
         let rel = String(normalized.dropFirst("~/Library/".count))

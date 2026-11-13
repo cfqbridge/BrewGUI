@@ -7,12 +7,35 @@ import CryptoKit
 public final class BrewStore: ObservableObject {
     public static let shared = BrewStore()
 
-    @Published public var installedPackages: [BrewPackage] = []
-    @Published public var catalogEntries: [CatalogEntry] = []
-    @Published public var adoptCandidates: [AdoptCandidate] = []
+    @Published public var installedPackages: [BrewPackage] = [] {
+        didSet {
+            rebuildInstalledLookupCaches()
+        }
+    }
+    @Published public var catalogEntries: [CatalogEntry] = [] {
+        didSet {
+            recomputeSearchResults()
+        }
+    }
+    @Published public var adoptCandidates: [AdoptCandidate] = [] {
+        didSet {
+            rebuildAdoptLookupCache()
+            recomputeAdoptFilterResults()
+        }
+    }
     @Published public var ignoredAdoptTokens: Set<String> = []
-    @Published public var showIgnoredAdoptCandidates: Bool = false
+    @Published public var showIgnoredAdoptCandidates: Bool = false {
+        didSet {
+            recomputeAdoptFilterResults()
+        }
+    }
     @Published public var localApplicationsSet: Set<String> = []
+    @Published public private(set) var filteredCatalogEntries: [CatalogEntry] = []
+    @Published public private(set) var filteredAdoptCandidatesList: [AdoptCandidate] = []
+
+    private var installedPackageMap: [String: BrewPackage] = [:]
+    private var managedCaskAppBundles: Set<String> = []
+    private var adoptCandidateByToken: [String: AdoptCandidate] = [:]
 
     @Published public var isBrewInstalled: Bool = (BrewCommandRunner.detectBrewExecutablePath() != nil)
     @Published public var copiedInstallCommand: Bool = false
@@ -34,9 +57,23 @@ public final class BrewStore: ObservableObject {
     @Published public var showAllDependencies: Bool = false
     @Published public var packagePendingUninstall: BrewPackage?
 
-    @Published public var catalogSearchQuery: String = ""
-    @Published public var catalogTypeFilter: SearchTypeFilter = .all
-    @Published public var selectedSearchCategory: SearchCategoryPreset = .all
+    @Published public var catalogSearchQuery: String = "" {
+        didSet {
+            recomputeSearchResults()
+            recomputeAdoptFilterResults()
+        }
+    }
+    @Published public var catalogTypeFilter: SearchTypeFilter = .all {
+        didSet {
+            recomputeSearchResults()
+            recomputeAdoptFilterResults()
+        }
+    }
+    @Published public var selectedSearchCategory: SearchCategoryPreset = .all {
+        didSet {
+            recomputeSearchResults()
+        }
+    }
 
     // Batch Install state
     @Published public var batchInputText: String = ""
@@ -1110,11 +1147,11 @@ public final class BrewStore: ObservableObject {
     public func recomputeAdoptCandidates() {
         let fm = FileManager.default
         let installedCaskTokens = Set(installedPackages.filter { $0.type == .cask }.map { $0.name })
-        let managedAppBundles = Set(installedPackages.filter { $0.type == .cask }.flatMap { $0.appBundles })
+        let managedAppBundles = managedCaskAppBundles
 
         var candidatesByApp: [String: CatalogEntry] = [:]
 
-        for entry in catalogEntries where entry.type == .cask {
+        for entry in catalogEntries where entry.type == .cask && !entry.isDisabled {
             guard !installedCaskTokens.contains(entry.name) else { continue }
             for appBundle in entry.appBundles {
                 guard localApplicationsSet.contains(appBundle),
@@ -1174,17 +1211,125 @@ public final class BrewStore: ObservableObject {
         self.adoptCandidates = list
     }
 
+    private func rebuildInstalledLookupCaches() {
+        var map: [String: BrewPackage] = [:]
+        map.reserveCapacity(installedPackages.count)
+        var bundles: Set<String> = []
+        for pkg in installedPackages {
+            map[pkg.id] = pkg
+            if pkg.type == .cask {
+                for b in pkg.appBundles {
+                    bundles.insert(b)
+                }
+            }
+        }
+        self.installedPackageMap = map
+        self.managedCaskAppBundles = bundles
+    }
+
+    private func rebuildAdoptLookupCache() {
+        var map: [String: AdoptCandidate] = [:]
+        map.reserveCapacity(adoptCandidates.count)
+        for cand in adoptCandidates {
+            map[cand.caskToken] = cand
+        }
+        self.adoptCandidateByToken = map
+    }
+
+    public func recomputeSearchResults() {
+        guard catalogTypeFilter != .adoptable else {
+            return
+        }
+        let trimmed = catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let activeCategory = selectedSearchCategory
+        let typeFilter = catalogTypeFilter
+
+        let pool = catalogEntries.filter { entry in
+            switch typeFilter {
+            case .all: break
+            case .formulae: if entry.type != .formula { return false }
+            case .casks: if entry.type != .cask { return false }
+            case .adoptable: return false
+            }
+            if activeCategory != .all {
+                return ChineseSearchIndex.matchesCategory(entry, category: activeCategory)
+            }
+            return true
+        }
+
+        guard !trimmed.isEmpty else {
+            if activeCategory != .all {
+                let curatedList = pool.filter { !$0.isDisabled && ChineseSearchIndex.curated[$0.nameLower] != nil }
+                let others = pool.filter { !$0.isDisabled && ChineseSearchIndex.curated[$0.nameLower] == nil }
+                self.filteredCatalogEntries = Array((curatedList + others).prefix(150))
+            } else {
+                self.filteredCatalogEntries = Array(pool.filter { !$0.isDisabled }.prefix(120))
+            }
+            return
+        }
+
+        // Pre-filter English functional rules matching `trimmed` once outside the 16,500+ entry loop
+        let activeRules = ChineseSearchIndex.matchingEnglishRules(for: trimmed)
+
+        var rank0: [CatalogEntry] = []
+        var rank1: [CatalogEntry] = []
+        var rank2: [CatalogEntry] = []
+        var rank3: [CatalogEntry] = []
+        var rank4: [CatalogEntry] = []
+        var disabledMatches: [CatalogEntry] = []
+
+        for entry in pool {
+            guard let r = ChineseSearchIndex.matchRank(for: entry, queryLower: trimmed, activeRules: activeRules) else { continue }
+            if entry.isDisabled && r > 0 {
+                disabledMatches.append(entry)
+                continue
+            }
+            switch r {
+            case 0: rank0.append(entry)
+            case 1: rank1.append(entry)
+            case 2: rank2.append(entry)
+            case 3: rank3.append(entry)
+            default: rank4.append(entry)
+            }
+        }
+
+        let merged = rank0 + rank1 + rank2 + rank3 + rank4 + disabledMatches
+        self.filteredCatalogEntries = Array(merged.prefix(200))
+    }
+
+    public func recomputeAdoptFilterResults() {
+        let base = showIgnoredAdoptCandidates ? adoptCandidates : activeAdoptCandidates
+        let trimmed = catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else {
+            self.filteredAdoptCandidatesList = base
+            return
+        }
+        self.filteredAdoptCandidatesList = base.filter { item in
+            let zhMeta = ChineseSearchIndex.meta(for: item.caskToken)
+            return item.appName.lowercased().contains(trimmed)
+                || item.caskToken.lowercased().contains(trimmed)
+                || item.caskDisplayName.lowercased().contains(trimmed)
+                || item.desc.lowercased().contains(trimmed)
+                || (zhMeta?.zhNameLower.contains(trimmed) ?? false)
+                || (zhMeta?.keywordsLower.contains(trimmed) ?? false)
+        }
+    }
+
     public func installedPackage(for entry: CatalogEntry) -> BrewPackage? {
-        installedPackages.first { $0.type == entry.type && $0.name == entry.name }
+        installedPackageMap[entry.id]
+    }
+
+    public func adoptCandidate(for caskToken: String) -> AdoptCandidate? {
+        adoptCandidateByToken[caskToken]
     }
 
     public func adoptableAppName(for entry: CatalogEntry) -> String? {
         guard entry.type == .cask,
-              installedPackage(for: entry) == nil,
+              !entry.isDisabled,
+              installedPackageMap[entry.id] == nil,
               !ignoredAdoptTokens.contains(entry.name) else { return nil }
-        let managedAppBundles = Set(installedPackages.filter { $0.type == .cask }.flatMap { $0.appBundles })
         for bundle in entry.appBundles {
-            if localApplicationsSet.contains(bundle) && !managedAppBundles.contains(bundle) {
+            if localApplicationsSet.contains(bundle) && !managedCaskAppBundles.contains(bundle) {
                 return bundle
             }
         }
@@ -1289,7 +1434,7 @@ public final class BrewStore: ObservableObject {
                             id: token,
                             rawToken: token,
                             status: .readyToInstall(entry),
-                            isSelected: true,
+                            isSelected: !entry.isDisabled,
                             useAdoptIfAvailable: false
                         )
                     )
@@ -2015,10 +2160,10 @@ public final class BrewStore: ObservableObject {
 
     public func uninstallPackage(_ pkg: BrewPackage, zap: Bool = false) {
         var args = pkg.type == .cask
-            ? ["uninstall", "--cask"]
+            ? ["uninstall", "--cask", "--force"]
             : ["uninstall"]
         if zap && pkg.type == .cask {
-            args.append("--zap")
+            args = ["uninstall", "--cask", "--zap", "--force"]
         }
         args.append(pkg.name)
         enqueueTask(
@@ -2344,12 +2489,51 @@ public final class BrewStore: ObservableObject {
             }
 
             do {
-                let exitCode = try await BrewCommandRunner.shared.runStreaming(
+                var exitCode = try await BrewCommandRunner.shared.runStreaming(
                     arguments: task.arguments,
                     allowAutoUpdate: isUpdateCommand || allowAutoUpdate
                 ) { [weak self] chunk in
                     Task { @MainActor in
                         self?.appendLog(chunk)
+                    }
+                }
+
+                // Resilient fallback for `brew uninstall --cask --zap`:
+                // When macOS Full Disk Access blocks `~/Library/Application Support/com.apple.sharedfilelist/...`,
+                // Homebrew aborts mid-way leaving the backed-up .app in Caskroom (causing deadlocks on retry).
+                // Automatically fallback to `brew uninstall --cask --force <token>` and safely trash remaining user-level :zap paths.
+                if exitCode != 0,
+                   !stopAllRequested,
+                   !skipCurrentRequested,
+                   task.arguments.first == "uninstall",
+                   task.arguments.contains("--cask"),
+                   task.arguments.contains("--zap"),
+                   let caskToken = task.arguments.last,
+                   !caskToken.hasPrefix("-") {
+                    appendLog(
+                        "\n" + tr(
+                            "[容错兜底] 检测到 --zap 深度清理受 macOS 完全磁盘访问权限 (Full Disk Access) 限制中断，正在自动回退执行强制卸载并安全清理用户目录残留…\n",
+                            "[容錯兜底] 偵測到 --zap 深度清理受 macOS 完全磁碟取用權限 (Full Disk Access) 限制中斷，正在自動回退執行強制解除安裝並安全清理使用者目錄殘留…\n",
+                            "[Resilient Fallback] --zap was blocked by macOS Full Disk Access; falling back to forced Cask uninstall and safe leftover cleanup…\n"
+                        )
+                    )
+                    let fallbackArgs = ["uninstall", "--cask", "--force", caskToken]
+                    let fbStamp = Self.dateTimeFormatter.string(from: Date())
+                    appendLog("[\(fbStamp)] $ brew \(fallbackArgs.joined(separator: " "))\n")
+                    let fallbackExit = (try? await BrewCommandRunner.shared.runStreaming(
+                        arguments: fallbackArgs,
+                        allowAutoUpdate: false
+                    ) { [weak self] chunk in
+                        Task { @MainActor in
+                            self?.appendLog(chunk)
+                        }
+                    }) ?? -1
+
+                    await cleanSafeZapResiduesAfterUninstall(forCaskToken: caskToken)
+
+                    let caskroomPath = "/opt/homebrew/Caskroom/\(caskToken)"
+                    if fallbackExit == 0 || !FileManager.default.fileExists(atPath: caskroomPath) {
+                        exitCode = 0
                     }
                 }
 
@@ -2402,6 +2586,55 @@ public final class BrewStore: ObservableObject {
         await scanAppLeftovers()
         if needsCatalogRebuild {
             await refreshCatalog(forceRebuild: true)
+        }
+    }
+
+    /// Safely trash user-level `:zap` leftover paths and `/private/tmp/cask-<token>-*` staging directories after a `--zap` uninstall fallback
+    private func cleanSafeZapResiduesAfterUninstall(forCaskToken token: String) async {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        var cleanedCount = 0
+        var freedBytes: Int64 = 0
+
+        if let entry = catalogEntries.first(where: { $0.type == .cask && $0.nameLower == token.lowercased() }),
+           let zapPaths = entry.zapTrashPaths {
+            for displayPath in zapPaths where BrewCatalogService.isSafeUserLibraryZapPath(displayPath) {
+                let rel = String(displayPath.dropFirst(2)) // drop "~/"
+                let fullPath = (home as NSString).appendingPathComponent(rel)
+                guard fm.fileExists(atPath: fullPath) else { continue }
+                let (bytes, _) = Self.measureFileOrDirectorySize(atPath: fullPath)
+                let url = URL(fileURLWithPath: fullPath)
+                do {
+                    try fm.trashItem(at: url, resultingItemURL: nil)
+                    cleanedCount += 1
+                    freedBytes += bytes
+                } catch {
+                    _ = try? await NSWorkspace.shared.recycle([url])
+                    if !fm.fileExists(atPath: fullPath) {
+                        cleanedCount += 1
+                        freedBytes += bytes
+                    }
+                }
+            }
+        }
+
+        // Also clean up temporary `/private/tmp/cask-<token>-*` directories left behind by aborted `brew uninstall --zap`
+        if let tmpItems = try? fm.contentsOfDirectory(atPath: "/private/tmp") {
+            let prefix = "cask-\(token)-"
+            for item in tmpItems where item.hasPrefix(prefix) {
+                try? fm.removeItem(atPath: "/private/tmp/\(item)")
+            }
+        }
+
+        if cleanedCount > 0 {
+            let sizeStr = AppConstants.formatBytes(freedBytes)
+            appendLog(
+                tr(
+                    "[容错兜底] 🧹 已自动将 \(cleanedCount) 项用户目录应用残留 (\(sizeStr)) 移至废纸篓。\n",
+                    "[容錯兜底] 🧹 已自動將 \(cleanedCount) 項使用者目錄應用殘留 (\(sizeStr)) 移至垃圾桶。\n",
+                    "[Resilient Fallback] 🧹 Moved \(cleanedCount) user-directory leftover items (\(sizeStr)) to Trash.\n"
+                )
+            )
         }
     }
 
