@@ -968,11 +968,14 @@ public struct MaintenanceView: View {
                     // Add new tap bar
                     HStack(spacing: 8) {
                         TextField(
-                            tr("输入 user/repo (例如 oven-sh/bun)…", "輸入 user/repo (例如 oven-sh/bun)…", "Enter user/repo (e.g. oven-sh/bun)…"),
+                            tr("输入 user/repo 或直接粘贴 brew tap 命令…", "輸入 user/repo 或直接貼上 brew tap 命令…", "Enter user/repo or paste `brew tap ...` command…"),
                             text: $store.newTapInput
                         )
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.caption, design: .monospaced))
+                        .onSubmit {
+                            store.addTap(store.newTapInput)
+                        }
 
                         Button {
                             store.addTap(store.newTapInput)

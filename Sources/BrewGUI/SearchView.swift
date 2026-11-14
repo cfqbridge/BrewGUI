@@ -210,7 +210,7 @@ public struct SearchView: View {
                     onInstall: { store.installCatalogEntry(entry, forceOverwrite: adoptApp != nil) },
                     onAdopt: { forceUpgrade in
                         store.adoptCask(
-                            token: entry.name,
+                            token: entry.qualifiedName,
                             displayName: entry.displayName,
                             appBundles: entry.appBundles,
                             forceOverwriteToUpgrade: forceUpgrade
@@ -392,6 +392,10 @@ private struct SearchCatalogRow: View {
                         text: entry.type.rawValue,
                         color: entry.type == .cask ? .purple : .blue
                     )
+
+                    if let tap = entry.tap, !tap.isEmpty {
+                        BadgeView(text: "Tap: \(tap)", color: .indigo)
+                    }
 
                     if entry.isDisabled {
                         BadgeView(

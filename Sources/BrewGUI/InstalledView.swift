@@ -38,7 +38,8 @@ public struct InstalledView: View {
             case .all:
                 break
             case .outdated:
-                if !pkg.isOutdated && !pkg.hasBundleVersionMismatch { return false }
+                let isOutdatedNow = pkg.isOutdated || (store.includeGreedyOutdated && pkg.isGreedyOutdated)
+                if !isOutdatedNow && !pkg.hasBundleVersionMismatch { return false }
             case .formulae:
                 if pkg.type != .formula { return false }
             case .casks:
@@ -76,6 +77,16 @@ public struct InstalledView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .help(tr("关闭时仅展示主动安装的顶层包 (brew leaves + Casks)", "關閉時僅展示主動安裝的頂層套件 (brew leaves + Casks)", "When off, only shows top-level installed packages (brew leaves + Casks)"))
+
+                Toggle(
+                    store.greedyOnlyOutdatedCount > 0
+                        ? tr("含自更新 (--greedy +\(store.greedyOnlyOutdatedCount))", "含自更新 (--greedy +\(store.greedyOnlyOutdatedCount))", "Greedy (+\(store.greedyOnlyOutdatedCount))")
+                        : tr("含自更新 (--greedy)", "含自更新 (--greedy)", "Greedy (--greedy)"),
+                    isOn: $store.includeGreedyOutdated
+                )
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help(tr("开启后将额外检测带有内置自动更新 (auto_updates) 或 :latest 标签的 Cask 应用是否有新版本", "開啟後將額外偵測帶有內建自動更新 (auto_updates) 或 :latest 標籤的 Cask 應用是否有新版本", "When enabled, also checks Casks with built-in auto_updates or :latest version tags"))
 
                 Spacer()
 
@@ -187,11 +198,14 @@ public struct InstalledView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(filteredPackages) { pkg in
+                    let isEffectivelyOutdated = pkg.isOutdated || (store.includeGreedyOutdated && pkg.isGreedyOutdated)
                     InstalledPackageRow(
                         pkg: pkg,
-                        probedSizeBytes: (pkg.isOutdated || pkg.hasBundleVersionMismatch) ? store.sizeBytes(for: pkg.name) : nil,
+                        includeGreedy: store.includeGreedyOutdated,
+                        probedSizeBytes: (isEffectivelyOutdated || pkg.hasBundleVersionMismatch) ? store.sizeBytes(for: pkg.name) : nil,
                         onUpgrade: { store.upgradePackage(pkg) },
                         onTogglePin: { store.togglePin(pkg) },
+                        onRemoveQuarantine: { store.removeQuarantine(for: pkg) },
                         onUninstall: { store.packagePendingUninstall = pkg }
                     )
                     .padding(.vertical, 4)
@@ -257,10 +271,16 @@ public struct InstalledView: View {
 
 private struct InstalledPackageRow: View {
     let pkg: BrewPackage
+    let includeGreedy: Bool
     let probedSizeBytes: Int64?
     let onUpgrade: () -> Void
     let onTogglePin: () -> Void
+    let onRemoveQuarantine: () -> Void
     let onUninstall: () -> Void
+
+    private var isEffectivelyOutdated: Bool {
+        pkg.isOutdated || (includeGreedy && pkg.isGreedyOutdated)
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -281,6 +301,10 @@ private struct InstalledPackageRow: View {
                         color: pkg.type == .cask ? .purple : .blue
                     )
 
+                    if let tap = pkg.tap, !tap.isEmpty {
+                        BadgeView(text: "Tap: \(tap)", color: .indigo)
+                    }
+
                     if !pkg.isTopLevel {
                         BadgeView(text: tr("依赖包", "依賴套件", "Dependency"), color: .gray)
                     }
@@ -289,7 +313,13 @@ private struct InstalledPackageRow: View {
                         BadgeView(text: tr("已锁定 (Pinned)", "已鎖定 (Pinned)", "Pinned"), color: .orange)
                     }
 
-                    if pkg.hasBundleVersionMismatch {
+                    if !pkg.isOutdated && pkg.isGreedyOutdated && includeGreedy {
+                        BadgeView(text: tr("内置自更新 (Greedy)", "內建自更新 (Greedy)", "Auto-Updates (Greedy)"), color: .indigo)
+                    }
+
+                    if pkg.isAppBundleMissingOnDisk {
+                        BadgeView(text: tr("应用已移除 (仅存账面记录)", "應用已移除 (僅存帳面記錄)", "App bundle removed"), color: .orange)
+                    } else if pkg.hasBundleVersionMismatch {
                         BadgeView(text: tr("本地未覆盖 (需同步更新)", "本機未覆蓋 (需同步更新)", "On-disk mismatch (Needs sync)"), color: .orange)
                     }
 
@@ -312,7 +342,7 @@ private struct InstalledPackageRow: View {
                 }
 
                 HStack(spacing: 12) {
-                    if pkg.hasBundleVersionMismatch {
+                    if pkg.hasBundleVersionMismatch && !isEffectivelyOutdated {
                         HStack(spacing: 4) {
                             Text("\(tr("实际应用", "實際應用", "On-disk")): \(pkg.actualBundleVersion ?? "?")")
                                 .font(.caption.monospaced())
@@ -324,7 +354,7 @@ private struct InstalledPackageRow: View {
                                 .font(.caption.monospaced().weight(.semibold))
                                 .foregroundStyle(.orange)
                         }
-                    } else if pkg.isOutdated {
+                    } else if isEffectivelyOutdated {
                         HStack(spacing: 4) {
                             Text(pkg.installedVersion ?? "")
                                 .font(.caption.monospaced())
@@ -358,12 +388,12 @@ private struct InstalledPackageRow: View {
 
             // Right Actions
             HStack(spacing: 8) {
-                if pkg.isOutdated || pkg.hasBundleVersionMismatch {
+                if isEffectivelyOutdated || pkg.hasBundleVersionMismatch {
                     Button {
                         onUpgrade()
                     } label: {
                         Label(
-                            pkg.hasBundleVersionMismatch && !pkg.isOutdated
+                            pkg.hasBundleVersionMismatch && !isEffectivelyOutdated
                                 ? tr("覆盖升级", "覆蓋升級", "Force Sync")
                                 : tr("升级", "升級", "Upgrade"),
                             systemImage: "arrow.up.circle.fill"
@@ -374,7 +404,7 @@ private struct InstalledPackageRow: View {
                     .controlSize(.small)
                     .disabled(pkg.isPinned)
                     .help(
-                        pkg.hasBundleVersionMismatch && !pkg.isOutdated
+                        pkg.hasBundleVersionMismatch && !isEffectivelyOutdated
                             ? tr("之前使用 --adopt 仅认领了旧版应用而未替换文件，点击将自动退出旧应用并执行 brew reinstall --cask --force 覆盖升级至 \(pkg.latestVersion)", "之前使用 --adopt 僅認領了舊版應用而未替換檔案，點擊將自動結束舊應用並執行 brew reinstall --cask --force 覆蓋升級至 \(pkg.latestVersion)", "Previously adopted without overwriting files. Click to quit running app and run brew reinstall --cask --force to update to \(pkg.latestVersion)")
                             : "\(tr("升级", "升級", "Upgrade")) \(pkg.displayName)"
                     )
@@ -389,6 +419,21 @@ private struct InstalledPackageRow: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help(pkg.isPinned ? tr("解锁版本 (brew unpin)", "解鎖版本 (brew unpin)", "Unpin version (brew unpin)") : tr("锁定当前版本防止升级 (brew pin)", "鎖定目前版本防止升級 (brew pin)", "Pin version to prevent upgrades (brew pin)"))
+                } else if !pkg.appBundles.isEmpty && !pkg.isAppBundleMissingOnDisk {
+                    Button {
+                        onRemoveQuarantine()
+                    } label: {
+                        Image(systemName: "checkmark.shield")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help(
+                        tr(
+                            "解除系统隔离属性 (xattr -dr com.apple.quarantine，修复打开时提示“已损坏/无法验证开发者”)",
+                            "解除系統隔離屬性 (xattr -dr com.apple.quarantine，修復開啟時提示「已損毀/無法驗證開發者」)",
+                            "Remove Gatekeeper quarantine attribute (xattr -dr com.apple.quarantine to fix 'damaged/unverified developer' prompt)"
+                        )
+                    )
                 }
 
                 Button(role: .destructive) {

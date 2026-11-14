@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.2.261113-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.3.261114-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -43,26 +43,28 @@
 
 ### 2. 🔍 Bilingual Scenario Search & Smart Local App Adoption (`Adopt`)
 - **Sub-Millisecond Search with Category Pills**: Built-in dictionary of 170+ popular Mac apps with bilingual aliases, precomputed lowercase/tag indexing (`< 1ms` per keystroke), and 11 one-click category presets (`Essentials`, `Screenshot`, `Archive`, `Media`, `Translate`, `Productivity`, `Dev & CLI`, `AI Tools`, `Network`, `System & Clean`).
+- **Third-Party Tap Indexing**: Automatically scans installed third-party Tap repositories under `/opt/homebrew/Library/Taps/...` (e.g., `chen08209/tap/flclash`) and merges their Formulae and Casks into the global search and batch-install catalog.
 - **Disabled & Deprecated Package Awareness**: Parses Homebrew `disable_args` and `deprecate_args` (e.g., Casks disabled due to macOS Gatekeeper notarization checks or discontinued upstream), surfacing clear badges, human-readable reasons, direct website links, and recommended replacement packages.
 - **Smart `/Applications` Scanner & 4-Category Risk Advisories**: Automatically detects manually installed apps and flags **Mac App Store apps**, **version-locked production/plugin apps**, **apps with faster built-in updaters**, and **possible name/version collisions**, complete with a visual decision guide and one-click ignore for flagged items.
 - **Version-Aware Force Upgrade**: When a local app is older than the Homebrew Cask version, BrewGUI uses `brew install --cask --force` to adopt and upgrade the app in one step rather than merely claiming an outdated bundle.
 
 ### 3. 📦 Installed Packages & On-Disk Bundle Verification
-- **Multi-Dimensional Filtering**: Filter by Outdated, Top-Level (`brew leaves`), Formulae, Casks, or Pinned status (`brew pin` / `unpin`).
+- **Multi-Dimensional Filtering & Greedy Outdated (`--greedy`)**: Filter by Outdated, Top-Level (`brew leaves`), Formulae, Casks, or Pinned status (`brew pin` / `unpin`); toggle **Include Self-Updating (`--greedy`)** to detect and upgrade Casks with `auto_updates true` or `:latest` while automatically excluding orphaned Caskroom records whose `.app` bundles were removed from `/Applications`.
 - **Real `Info.plist` Version Check**: Cross-checks `/Applications/<App>.app/Contents/Info.plist` against Homebrew's recorded version to catch version drift.
+- **One-Click Gatekeeper Quarantine Removal**: Click the shield button (`xattr -dr com.apple.quarantine`) on any installed Cask to clear macOS "damaged / unverified developer" Gatekeeper prompts.
 - **Resilient Uninstall & `--zap` Fallback**: Uninstall Casks normally or with `--zap` to purge associated caches and preference files; if macOS Full Disk Access blocks protected paths (`com.apple.sharedfilelist`), BrewGUI automatically falls back to forced Cask removal and safely trashes remaining user-directory leftovers without leaving Caskroom backups behind.
 
 ### 4. 🧹 4-in-1 Advanced Maintenance (Cache / `:zap` Leftovers / Services / Doctor)
 - **Download Cache & Orphan Formulae**: Inspect every cached archive in `~/Library/Caches/Homebrew/downloads`, run `brew cleanup --prune=all`, and clean unused dependencies via `brew autoremove`.
 - **Uninstalled App Leftover Scanner (`:zap`)**: Cross-references Cask `:zap` rules against installed Brew packages and `/Applications` `CFBundleIdentifier`s to safely detect and move orphaned `~/Library` folders of previously uninstalled apps to macOS Trash.
 - **Background Services Manager (`brew services`)**: View, start, stop, restart, or run launchd background services (MySQL, Redis, PostgreSQL, Nginx, Ollama, Syncthing).
-- **Environment Health & Tap Manager (`brew doctor` & `brew tap`)**: Run `brew doctor` with structured warning cards and manage third-party Tap repositories (`user/repo`).
+- **Environment Health & Tap Manager (`brew doctor` & `brew tap`)**: Run `brew doctor` with structured warning cards and manage third-party Tap repositories (`user/repo` with automatic `brew tap` / GitHub URL sanitization).
 
-### 5. ⚡️ Batch Install & Environment Migration
-- **Paste & Parse**: Paste raw package lists or `brew install` scripts to resolve catalog status in real time.
+### 5. ⚡️ Batch Install, Standard `Brewfile` & Environment Migration
+- **Paste & `Brewfile` Import**: Paste raw package lists, `brew install` scripts, or import a standard `Brewfile` (`NSOpenPanel`) to resolve `tap`, `brew`, and `cask` entries in real time with one-click missing Tap installation.
 - **Concurrent Download Size Probing**: Probes HTTP `HEAD Content-Length` concurrently so you can preview package sizes and filter lightweight packages (`<100MB`) first.
 - **Hybrid Queue Scheduling**: Merges Formulae into a single dependency-shared command while queuing Casks individually so you can skip slow downloads at any time.
-- **One-Click Export**: Export all top-level Formulae (`leaves`) and Casks from your Mac for effortless migration.
+- **Dual-Mode Export (CLI Command & Standard `Brewfile`)**: Export all top-level Formulae (`leaves`), Casks, and third-party Taps from your Mac as a CLI command or a standard `Brewfile`.
 
 ### 6. 📊 Real-Time Download Speed & Task Control
 - **Live `.incomplete` Progress Tracking**: Monitors Homebrew's active download stream to display real-time percentage, downloaded bytes, and transfer speed (`KB/s`, `MB/s`).

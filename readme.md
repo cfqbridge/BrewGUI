@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.2.261113-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.3.261114-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -43,26 +43,28 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 
 ### 2. 🔍 中文场景搜索与本机应用智能接管 (Adopt)
 - **内置中文别名与 11 大场景分类检索**：内置 170+ 主流 Mac 软件中文名/简介词典与全量英文 `desc` 自动中文功能标签映射，支持直接输入“截图”、“解压”、“播放器”、“翻译”、“终端”毫秒级检索（预计算索引特征与 $O(1)$ 状态字典映射，打字检索耗时 `< 1ms`），并提供「🔥 装机必备」、「📸 截图/录屏」、「📦 解压/归档」、「🎬 影音播放」、「🤖 AI 工具」等一键分类筛选。
+- **第三方 Tap 仓库自动索引**：自动扫描本机已添加的第三方 Tap（`/opt/homebrew/Library/Taps/...`）中的 Formula 与 Cask（如 `chen08209/tap/flclash`）并入全量搜索与批量安装索引，增删 Tap 后自动重建缓存。
 - **已禁用 / 已弃用包智能识别与引导**：自动解析全量索引中的 `disable_args` 与 `deprecate_args`（如未通过 macOS Gatekeeper 公证或上游停更的软件包），醒目标注红色「已禁用」/ 黄色「已弃用」标签及可读原因，拦截无效报错安装并直接引导官网下载或官方替代包。
 - **本机应用接管图文避坑指南与 4 类风险识别**：自动扫描 `/Applications`，智能识别并标记 **App Store 渠道应用**、**生产力/老插件版本敏感应用**、**厂商内建更新更快的国内应用** 及 **同名撞库版本异常应用**，支持一键忽略全部不推荐项。
 - **版本比对与一键升级覆盖**：当本地应用版本落后于 Cask 最新版时，支持一键 `brew install --cask --force` 覆盖升级，彻底解决旧版残留与认领脱节问题。
 
 ### 3. 📦 已安装包管理与真实版本校验
-- **多维度版本透视**：直观展示顶层安装包 (`leaves`)、全量依赖树、版本锁定状态 (`pin/unpin`)。
+- **多维度版本透视与贪婪更新 (`--greedy`)**：直观展示顶层安装包 (`leaves`)、全量依赖树、版本锁定状态 (`pin/unpin`)；内置 `含自更新 (--greedy)` 开关，支持一键检测并升级带 `auto_updates true` 或 `:latest` 的桌面软件（自动过滤已从 `/Applications` 删除的孤儿记录与本机已自更新到最新版的软件）。
 - **真实磁盘版本校验**：自动校验本地应用 `Info.plist` 真实版本与 Homebrew 账面记录，杜绝“账面已更新、磁盘仍是旧版本”。
+- **单应用一键解除隔离拦截**：已安装 Cask 行内置盾牌按钮（`xattr -dr com.apple.quarantine`），一键修复开源软件或第三方 Tap 应用双击报“已损坏 / 无法验证开发者”的 Gatekeeper 拦截弹窗。
 - **容错彻底卸载 (`--zap`)**：Cask 卸载支持普通卸载与 `--zap` 深度清理；当 `--zap` 遇到 macOS 完全磁盘访问权限受限路径（如 `sharedfilelist`）中断时，自动回退执行强制卸载清除 Caskroom 备份并安全清理其余用户目录残留，杜绝半卸载死锁。
 
 ### 4. 🧹 四合一进阶清理与系统维护 (Cache / `:zap` Leftovers / Services / Doctor)
 - **缓存文件与孤儿依赖清理**：直观展示 `~/Library/Caches/Homebrew/downloads` 缓存占用明细、一键 `brew cleanup --prune=all` 与 `brew autoremove` 孤儿依赖清理。
 - **已卸载软件残留深度清理 (`:zap` Leftovers)**：交叉比对 Homebrew Cask `:zap` 规则与本机 `/Applications` `CFBundleIdentifier`，精准揪出早已拖入废纸篓但遗留在 `~/Library` 下的孤儿配置与缓存目录，支持一键安全移至废纸篓。
 - **后台守护服务管理 (`brew services`)**：可视化查看、启动、停止、重启 MySQL、Redis、PostgreSQL、Nginx、Ollama 等后台服务并定位 `launchd` plist。
-- **环境健康体检与 Tap 源管理 (`brew doctor` & `brew tap`)**：图形化一键运行 `brew doctor` 诊断潜在冲突，支持第三方软件源 (`user/repo`) 可视化添加与移除。
+- **环境健康体检与 Tap 源管理 (`brew doctor` & `brew tap`)**：图形化一键运行 `brew doctor` 诊断潜在冲突，支持第三方软件源 (`user/repo`) 可视化添加与移除（支持粘贴 `brew tap` 整行命令或 GitHub 链接自动清洗）。
 
-### 5. ⚡️ 批量安装与环境快速迁移
-- **自由粘贴解析**：支持直接粘贴长串包名或整段 `brew install` 脚本，实时解析状态。
+### 5. ⚡️ 批量安装、标准 `Brewfile` 与环境快速迁移
+- **自由粘贴与 `Brewfile` 导入解析**：支持直接粘贴长串包名、`brew install` 脚本或导入标准 `Brewfile`，实时解析 `tap` / `brew` / `cask` 状态并提供缺失第三方 Tap 一键补齐。
 - **下载体积并发预检**：支持异步并发探测待安装包体积，支持大包提醒与轻量包（`<100MB`）优先安装。
 - **混合安装编排**：Formula 自动合并单条命令一次性解析公共依赖，Cask 逐个独立入队下载安装，互不阻塞，支持随时单包跳过。
-- **一键导出本机环境**：支持一键将当前机器所有顶层包导出为命令清单，换机恢复一键搞定。
+- **双模式导出本机环境（CLI 指令 & 标准 `Brewfile`）**：支持一键将当前机器所有顶层包导出为命令行脚本或保存为标准 `Brewfile` 文件，换机恢复一键搞定。
 
 ### 6. 📊 实时下载监控与任务管控
 - **透明进度监控**：突破非 TTY 管道限制，实时监控底层下载流量增长，直观呈现文件名、下载百分比与实时网速（KB/s、MB/s）。

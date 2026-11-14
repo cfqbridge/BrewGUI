@@ -6,7 +6,7 @@ public enum AppConstants {
         if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
             return shortVer
         }
-        return "2.2.261113"
+        return "2.3.261114"
     }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
@@ -185,6 +185,9 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
     public let isTopLevel: Bool      // leaf or installed on request / cask
     public let appBundles: [String]  // e.g. ["AppCleaner.app"] for Casks
     public let downloadURL: String?  // URL for HEAD Content-Length probing
+    public let tap: String?          // e.g. "chen08209/tap" for third-party Tap packages
+    public let autoUpdates: Bool     // true when Cask declares `auto_updates true`
+    public let isAppBundleMissingOnDisk: Bool // true when Cask declares `.app` bundles but none exist on disk
 
     public init(
         name: String,
@@ -199,7 +202,10 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         isPinned: Bool,
         isTopLevel: Bool,
         appBundles: [String],
-        downloadURL: String? = nil
+        downloadURL: String? = nil,
+        tap: String? = nil,
+        autoUpdates: Bool = false,
+        isAppBundleMissingOnDisk: Bool = false
     ) {
         self.name = name
         self.displayName = displayName
@@ -214,10 +220,44 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         self.isTopLevel = isTopLevel
         self.appBundles = appBundles
         self.downloadURL = downloadURL
+        self.tap = tap
+        self.autoUpdates = autoUpdates
+        self.isAppBundleMissingOnDisk = isAppBundleMissingOnDisk
     }
 
     public var isInstalled: Bool {
         installedVersion != nil
+    }
+
+    /// True when a Cask has a newer version in Homebrew (`installedVersion != latestVersion`),
+    /// is skipped by default `brew outdated` due to `auto_updates: true` or `:latest`,
+    /// and its `.app` bundle on disk is neither missing nor already self-updated to `latestVersion`.
+    public var isGreedyOutdated: Bool {
+        guard type == .cask,
+              !isOutdated,
+              !isAppBundleMissingOnDisk,
+              let inst = installedVersion,
+              !inst.isEmpty else {
+            return false
+        }
+        if latestVersion == "latest" {
+            return autoUpdates
+        }
+        guard inst != latestVersion else { return false }
+        if let actual = actualBundleVersion, !actual.isEmpty {
+            let latestPrimary = latestVersion.split(separator: ",").first.map(String.init) ?? latestVersion
+            if actual == latestPrimary
+                || latestPrimary.hasPrefix(actual + ".")
+                || latestPrimary.hasPrefix(actual + "-")
+                || latestPrimary.hasPrefix(actual + "_")
+                || actual.hasPrefix(latestPrimary + ".") {
+                return false
+            }
+            if actual.compare(latestPrimary, options: .numeric) != .orderedAscending {
+                return false
+            }
+        }
+        return true
     }
 
     /// True when --adopt recorded a newer version in Caskroom metadata than the actual .app bundle on disk
@@ -487,6 +527,7 @@ struct BrewInstalledResponse: Decodable {
 struct InstalledFormulaJSON: Decodable {
     let name: String
     let full_name: String?
+    let tap: String?
     let desc: String?
     let homepage: String?
     let versions: FormulaVersionsJSON
@@ -507,6 +548,7 @@ struct FormulaInstalledEntryJSON: Decodable {
 
 struct InstalledCaskJSON: Decodable {
     let token: String
+    let tap: String?
     let name: [String]?
     let desc: String?
     let homepage: String?
@@ -514,6 +556,7 @@ struct InstalledCaskJSON: Decodable {
     let version: String?
     let installed: String?
     let outdated: Bool?
+    let auto_updates: Bool?
     let artifacts: [[String: AnyCodable]]?
 }
 
@@ -558,6 +601,14 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
     public let deprecateDate: String?
     public let deprecateReason: String?
     public let replacementPackage: String?
+    public let tap: String?
+
+    public var qualifiedName: String {
+        if let tap, !tap.isEmpty, tap != "homebrew/core", tap != "homebrew/cask" {
+            return "\(tap)/\(name)"
+        }
+        return name
+    }
 
     // Precomputed in-memory search & display acceleration fields (excluded from disk JSON)
     public let nameLower: String
@@ -582,6 +633,7 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         case deprecateDate
         case deprecateReason
         case replacementPackage
+        case tap
     }
 
     public init(
@@ -598,7 +650,8 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         disableReason: String? = nil,
         deprecateDate: String? = nil,
         deprecateReason: String? = nil,
-        replacementPackage: String? = nil
+        replacementPackage: String? = nil,
+        tap: String? = nil
     ) {
         self.name = name
         self.displayName = displayName
@@ -614,14 +667,18 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         self.deprecateDate = deprecateDate
         self.deprecateReason = deprecateReason
         self.replacementPackage = replacementPackage
+        self.tap = tap
 
         let nLower = name.lowercased()
         let dispLower = displayName.lowercased()
         let dLower = desc.lowercased()
+        let tapLower = tap?.lowercased() ?? ""
         self.nameLower = nLower
         self.displayLower = dispLower
         self.descLower = dLower
-        self.searchHaystackLower = "\(nLower) \(dispLower) \(dLower)"
+        self.searchHaystackLower = tapLower.isEmpty
+            ? "\(nLower) \(dispLower) \(dLower)"
+            : "\(nLower) \(dispLower) \(dLower) \(tapLower)"
         self.hasChineseInDisplay = Self.containsHanCharacters(displayName)
         self.hasChineseInDesc = Self.containsHanCharacters(desc)
     }
@@ -642,6 +699,7 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
         let deprecateDate = try c.decodeIfPresent(String.self, forKey: .deprecateDate)
         let deprecateReason = try c.decodeIfPresent(String.self, forKey: .deprecateReason)
         let replacementPackage = try c.decodeIfPresent(String.self, forKey: .replacementPackage)
+        let tap = try c.decodeIfPresent(String.self, forKey: .tap)
 
         self.init(
             name: name,
@@ -657,12 +715,13 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
             disableReason: disableReason,
             deprecateDate: deprecateDate,
             deprecateReason: deprecateReason,
-            replacementPackage: replacementPackage
+            replacementPackage: replacementPackage,
+            tap: tap
         )
     }
 
     public static func == (lhs: CatalogEntry, rhs: CatalogEntry) -> Bool {
-        lhs.type == rhs.type && lhs.name == rhs.name && lhs.version == rhs.version
+        lhs.type == rhs.type && lhs.name == rhs.name && lhs.version == rhs.version && lhs.tap == rhs.tap
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -742,6 +801,13 @@ public struct CatalogEntry: Codable, Identifiable, Hashable, Sendable {
 public struct CatalogIndex: Codable, Sendable {
     public let generatedAt: Date
     public let entries: [CatalogEntry]
+    public let tapSignature: String?
+
+    public init(generatedAt: Date, entries: [CatalogEntry], tapSignature: String? = nil) {
+        self.generatedAt = generatedAt
+        self.entries = entries
+        self.tapSignature = tapSignature
+    }
 }
 
 // MARK: - v2.0 Advanced Maintenance Models (Leftovers, Services, Doctor & Taps)

@@ -6,18 +6,20 @@ public actor BrewCatalogService {
     private init() {}
 
     private var cacheFileURL: URL? {
-        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v5.json")
+        try? BrewCommandRunner.appSupportDirectory().appendingPathComponent("catalog_index_v6.json")
     }
 
     public func loadCatalog(forceRebuild: Bool = false) async throws -> [CatalogEntry] {
+        let tapSig = currentTapSignature()
         if !forceRebuild, let url = cacheFileURL, FileManager.default.fileExists(atPath: url.path) {
-            // Check if Homebrew internal payload was updated more recently than our index
+            // Check if Homebrew internal payload was updated more recently than our index, or if local Taps changed
             let indexMtime = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? .distantPast
             let payloadMtime = latestHomebrewPayloadModificationDate() ?? .distantPast
 
             if indexMtime >= payloadMtime,
                let data = try? Data(contentsOf: url),
                let decoded = try? JSONDecoder().decode(CatalogIndex.self, from: data),
+               decoded.tapSignature == tapSig,
                !decoded.entries.isEmpty {
                 return decoded.entries
             }
@@ -26,11 +28,10 @@ public actor BrewCatalogService {
         let entries = try await buildCatalogFromHomebrewCache()
         if let url = cacheFileURL, !entries.isEmpty {
             let dir = url.deletingLastPathComponent()
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index.json"))
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v2.json"))
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v3.json"))
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent("catalog_index_v4.json"))
-            let index = CatalogIndex(generatedAt: Date(), entries: entries)
+            for legacy in ["catalog_index.json", "catalog_index_v2.json", "catalog_index_v3.json", "catalog_index_v4.json", "catalog_index_v5.json"] {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(legacy))
+            }
+            let index = CatalogIndex(generatedAt: Date(), entries: entries, tapSignature: tapSig)
             if let encoded = try? JSONEncoder().encode(index) {
                 try? encoded.write(to: url, options: .atomic)
             }
@@ -59,12 +60,33 @@ public actor BrewCatalogService {
     }
 
     private func buildCatalogFromHomebrewCache() async throws -> [CatalogEntry] {
+        var baseEntries: [CatalogEntry]
         if let payloadURL = findInternalPayloadURL(),
            let parsed = try? parseInternalPayload(at: payloadURL),
            !parsed.isEmpty {
-            return parsed
+            baseEntries = parsed
+        } else {
+            baseEntries = try await buildFallbackCatalogFromTxtFiles()
         }
-        return try await buildFallbackCatalogFromTxtFiles()
+
+        let tapEntries = scanThirdPartyTapEntries()
+        if !tapEntries.isEmpty {
+            var indexMap: [String: Int] = [:]
+            indexMap.reserveCapacity(baseEntries.count)
+            for (idx, entry) in baseEntries.enumerated() {
+                indexMap[entry.id] = idx
+            }
+            for tapEntry in tapEntries {
+                if let existingIdx = indexMap[tapEntry.id] {
+                    baseEntries[existingIdx] = tapEntry
+                } else {
+                    indexMap[tapEntry.id] = baseEntries.count
+                    baseEntries.append(tapEntry)
+                }
+            }
+            baseEntries.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+        return baseEntries
     }
 
     private func parseInternalPayload(at url: URL) throws -> [CatalogEntry] {
@@ -236,6 +258,206 @@ public actor BrewCatalogService {
         }
 
         return results
+    }
+
+    // MARK: - Third-Party Local Tap Repository Scanner
+
+    private static let tapRoots = [
+        "/opt/homebrew/Library/Taps",
+        "/usr/local/Library/Taps"
+    ]
+
+    private func currentTapSignature() -> String {
+        let fm = FileManager.default
+        var records: [String] = []
+        for root in Self.tapRoots {
+            guard let users = try? fm.contentsOfDirectory(atPath: root) else { continue }
+            for user in users.sorted() where !user.hasPrefix(".") {
+                let userPath = (root as NSString).appendingPathComponent(user)
+                guard let repos = try? fm.contentsOfDirectory(atPath: userPath) else { continue }
+                for repoDir in repos.sorted() where !repoDir.hasPrefix(".") {
+                    let shortRepo = repoDir.hasPrefix("homebrew-") ? String(repoDir.dropFirst("homebrew-".count)) : repoDir
+                    let tapName = "\(user)/\(shortRepo)".lowercased()
+                    if tapName == "homebrew/core" || tapName == "homebrew/cask" { continue }
+                    let repoPath = (userPath as NSString).appendingPathComponent(repoDir)
+                    let rbFiles = Self.collectRubyFiles(inTapRepoPath: repoPath)
+                    for rb in rbFiles {
+                        let mtime = (try? fm.attributesOfItem(atPath: rb.path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                        records.append("\(tapName):\(rb.kind.rawValue):\((rb.path as NSString).lastPathComponent):\(Int64(mtime))")
+                    }
+                }
+            }
+        }
+        return records.joined(separator: "|")
+    }
+
+    private func scanThirdPartyTapEntries() -> [CatalogEntry] {
+        let fm = FileManager.default
+        var results: [CatalogEntry] = []
+        var seenIDs = Set<String>()
+
+        for root in Self.tapRoots {
+            guard let users = try? fm.contentsOfDirectory(atPath: root) else { continue }
+            for user in users.sorted() where !user.hasPrefix(".") {
+                let userPath = (root as NSString).appendingPathComponent(user)
+                guard let repos = try? fm.contentsOfDirectory(atPath: userPath) else { continue }
+                for repoDir in repos.sorted() where !repoDir.hasPrefix(".") {
+                    let shortRepo = repoDir.hasPrefix("homebrew-") ? String(repoDir.dropFirst("homebrew-".count)) : repoDir
+                    let tapName = "\(user)/\(shortRepo)"
+                    let tapLower = tapName.lowercased()
+                    if tapLower == "homebrew/core" || tapLower == "homebrew/cask" { continue }
+                    let repoPath = (userPath as NSString).appendingPathComponent(repoDir)
+                    let rbFiles = Self.collectRubyFiles(inTapRepoPath: repoPath)
+                    for rb in rbFiles {
+                        if let entry = Self.parseTapRubyFile(atPath: rb.path, defaultKind: rb.kind, tapName: tapName) {
+                            if !seenIDs.contains(entry.id) {
+                                seenIDs.insert(entry.id)
+                                results.append(entry)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return results
+    }
+
+    private static func collectRubyFiles(inTapRepoPath repoPath: String) -> [(path: String, kind: PackageType)] {
+        let fm = FileManager.default
+        var list: [(path: String, kind: PackageType)] = []
+
+        let casksDir = (repoPath as NSString).appendingPathComponent("Casks")
+        if let enumerator = fm.enumerator(atPath: casksDir) {
+            while let rel = enumerator.nextObject() as? String {
+                if rel.hasSuffix(".rb") && !(rel as NSString).lastPathComponent.hasPrefix(".") {
+                    list.append(((casksDir as NSString).appendingPathComponent(rel), .cask))
+                }
+            }
+        }
+
+        for formulaFolder in ["Formula", "HomebrewFormula"] {
+            let fDir = (repoPath as NSString).appendingPathComponent(formulaFolder)
+            if let enumerator = fm.enumerator(atPath: fDir) {
+                while let rel = enumerator.nextObject() as? String {
+                    if rel.hasSuffix(".rb") && !(rel as NSString).lastPathComponent.hasPrefix(".") {
+                        list.append(((fDir as NSString).appendingPathComponent(rel), .formula))
+                    }
+                }
+            }
+        }
+
+        if let rootItems = try? fm.contentsOfDirectory(atPath: repoPath) {
+            for item in rootItems where item.hasSuffix(".rb") && !item.hasPrefix(".") {
+                list.append(((repoPath as NSString).appendingPathComponent(item), .formula))
+            }
+        }
+
+        return list
+    }
+
+    private static func parseTapRubyFile(atPath path: String, defaultKind: PackageType, tapName: String) -> CatalogEntry? {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let fileBaseName = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+
+        let isCaskFile = defaultKind == .cask || firstRegexCapture(#"(?m)^\s*cask\s+["']([^"']+)["']"#, in: content) != nil
+        if isCaskFile {
+            let token = firstRegexCapture(#"(?m)^\s*cask\s+["']([^"']+)["']"#, in: content) ?? fileBaseName
+            let rawVersion = firstRegexCapture(#"(?m)^\s*version\s+["']([^"']+)["']"#, in: content)
+                ?? (content.range(of: #"(?m)^\s*version\s+:latest"#, options: .regularExpression) != nil ? "latest" : "")
+            let armArch = firstRegexCapture(#"arch\s+arm:\s*["']([^"']+)["']"#, in: content) ?? "arm64"
+            let displayName = firstRegexCapture(#"(?m)^\s*name\s+["']([^"']+)["']"#, in: content) ?? token
+            let desc = firstRegexCapture(#"(?m)^\s*desc\s+["']([^"']+)["']"#, in: content) ?? ""
+            let homepage = firstRegexCapture(#"(?m)^\s*homepage\s+["']([^"']+)["']"#, in: content) ?? ""
+
+            var downloadURL: String? = nil
+            if var rawURL = firstRegexCapture(#"(?m)^\s*url\s+["']([^"']+)["']"#, in: content) {
+                let verCSV = rawVersion.split(separator: ",").map(String.init)
+                rawURL = rawURL
+                    .replacingOccurrences(of: "#{version}", with: rawVersion)
+                    .replacingOccurrences(of: "#{version.csv.first}", with: verCSV.first ?? rawVersion)
+                    .replacingOccurrences(of: "#{version.csv.second}", with: verCSV.count > 1 ? verCSV[1] : "")
+                    .replacingOccurrences(of: "#{arch}", with: armArch)
+                if !rawURL.contains("#{") && (rawURL.hasPrefix("https://") || rawURL.hasPrefix("http://")) {
+                    downloadURL = rawURL
+                }
+            }
+
+            let appMatches = allRegexCaptures(#"(?m)^\s*app\s+["']([^"']+)["']"#, in: content)
+            var appBundles: [String] = []
+            for m in appMatches {
+                let b = (m as NSString).lastPathComponent
+                if b.hasSuffix(".app") && !appBundles.contains(b) {
+                    appBundles.append(b)
+                }
+            }
+
+            var zapPaths: [String] = []
+            if let zapRange = content.range(of: #"(?s)zap\s+trash:\s*(\[[^\]]*\]|["'][^"']+["'])"#, options: .regularExpression) {
+                let zapBlock = String(content[zapRange])
+                let quoted = allRegexCaptures(#"["']([^"']+)["']"#, in: zapBlock)
+                for p in quoted where isSafeUserLibraryZapPath(p) {
+                    if !zapPaths.contains(p) {
+                        zapPaths.append(p)
+                    }
+                }
+            }
+
+            return CatalogEntry(
+                name: token,
+                displayName: displayName,
+                type: .cask,
+                desc: desc,
+                homepage: homepage,
+                version: rawVersion,
+                appBundles: appBundles,
+                downloadURL: downloadURL,
+                zapTrashPaths: zapPaths.isEmpty ? nil : zapPaths,
+                tap: tapName
+            )
+        } else {
+            let name = fileBaseName
+            let desc = firstRegexCapture(#"(?m)^\s*desc\s+["']([^"']+)["']"#, in: content) ?? ""
+            let homepage = firstRegexCapture(#"(?m)^\s*homepage\s+["']([^"']+)["']"#, in: content) ?? ""
+            let rawURL = firstRegexCapture(#"(?m)^\s*url\s+["']([^"']+)["']"#, in: content)
+            var version = firstRegexCapture(#"(?m)^\s*version\s+["']([^"']+)["']"#, in: content) ?? ""
+            if version.isEmpty, let u = rawURL {
+                let lastComp = (u as NSString).lastPathComponent
+                if let inferred = firstRegexCapture(#"v?(\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._]+)?)"#, in: lastComp) {
+                    version = inferred
+                }
+            }
+            let cleanURL = (rawURL != nil && !rawURL!.contains("#{")) ? rawURL : nil
+            return CatalogEntry(
+                name: name,
+                displayName: name,
+                type: .formula,
+                desc: desc,
+                homepage: homepage,
+                version: version,
+                appBundles: [],
+                downloadURL: cleanURL,
+                tap: tapName
+            )
+        }
+    }
+
+    private static func firstRegexCapture(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges >= 2,
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return String(text[range])
+    }
+
+    private static func allRegexCaptures(_ pattern: String, in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        return matches.compactMap { m in
+            guard m.numberOfRanges >= 2, let r = Range(m.range(at: 1), in: text) else { return nil }
+            return String(text[r])
+        }
     }
 
     private static let sharedVendorRoots: Set<String> = [

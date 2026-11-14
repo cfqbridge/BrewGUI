@@ -1393,7 +1393,9 @@ public struct BrewGUIApp: App {
                 for pkg in s.outdatedPackages {
                     print("  -> [Needs Update/Sync] \(pkg.displayName) (recorded: \(pkg.installedVersion ?? "?"), actualDisk: \(pkg.actualBundleVersion ?? "?"), latest: \(pkg.latestVersion), mismatch=\(pkg.hasBundleVersionMismatch))")
                 }
-                print("Catalog Index Total: \(s.catalogEntries.count)")
+                print("Catalog Index Total: \(s.catalogEntries.count) (Third-party Tap entries: \(s.catalogEntries.filter { $0.tap != nil }.map { "\($0.tap ?? "")/\($0.name)" }.joined(separator: ", ")))")
+                print("Greedy Outdated Casks: \(s.greedyOnlyOutdatedCount) (\(s.installedPackages.filter(\.isGreedyOutdated).map { "\($0.name) (\($0.installedVersion ?? "?") -> \($0.latestVersion))" }.joined(separator: ", ")))")
+                print("Brewfile Export Lines: \(s.exportInstalledBrewfile().split(whereSeparator: \.isNewline).count)")
                 print("Local /Applications Scanned: \(s.localApplicationsSet.count)")
                 print("Adoptable Cask Candidates: \(s.adoptCandidates.count) (Active: \(s.activeAdoptCandidates.count), SuggestedIgnore: \(s.suggestedIgnoreAdoptCandidates.count), Ignored: \(s.ignoredAdoptCandidatesList.count))")
                 for c in s.adoptCandidates {
