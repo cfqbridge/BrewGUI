@@ -1,10 +1,11 @@
 import SwiftUI
+import AppKit
 
 public enum InstalledFilterCategory: String, CaseIterable, Identifiable {
     case all = "全部"
     case outdated = "可更新"
-    case formulae = "Formula"
     case casks = "Cask"
+    case formulae = "Formula"
 
     public var id: String { rawValue }
 
@@ -13,11 +14,11 @@ public enum InstalledFilterCategory: String, CaseIterable, Identifiable {
         case .all:
             return tr("全部", "全部", "All")
         case .outdated:
-            return tr("可更新", "可更新", "Outdated")
-        case .formulae:
-            return "Formula"
+            return tr("待更新", "待更新", "Updates")
         case .casks:
-            return "Cask"
+            return tr("桌面应用", "桌面應用", "Desktop Apps")
+        case .formulae:
+            return tr("命令行", "命令列", "CLI Tools")
         }
     }
 }
@@ -50,7 +51,8 @@ public struct InstalledView: View {
                 let matchName = pkg.name.lowercased().contains(q)
                 let matchDisplay = pkg.displayName.lowercased().contains(q)
                 let matchDesc = pkg.desc.lowercased().contains(q)
-                return matchName || matchDisplay || matchDesc
+                let matchZh = ChineseSearchIndex.meta(for: pkg.name)?.zhNameLower.contains(q) ?? false
+                return matchName || matchDisplay || matchDesc || matchZh
             }
             return true
         }
@@ -59,7 +61,7 @@ public struct InstalledView: View {
     public var body: some View {
         VStack(spacing: 0) {
             // Top Toolbar Bar
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Picker(tr("分类", "分類", "Category"), selection: $store.installedCategory) {
                     ForEach(InstalledFilterCategory.allCases) { item in
                         if item == .outdated && store.outdatedCount > 0 {
@@ -73,54 +75,63 @@ public struct InstalledView: View {
                 .labelsHidden()
                 .fixedSize()
 
-                Toggle(tr("显示全部依赖包", "顯示全部依賴套件", "Show All Dependencies"), isOn: $store.showAllDependencies)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .help(tr("关闭时仅展示主动安装的顶层包 (brew leaves + Casks)", "關閉時僅展示主動安裝的頂層套件 (brew leaves + Casks)", "When off, only shows top-level installed packages (brew leaves + Casks)"))
+                // Compact View Options Menu (Replaces technical switches in main bar)
+                Menu {
+                    Toggle(
+                        store.greedyOnlyOutdatedCount > 0
+                            ? tr("检测应用内自更新软件 (+\(store.greedyOnlyOutdatedCount) 款可更)", "偵測應用內自更新軟體 (+\(store.greedyOnlyOutdatedCount) 款可更)", "Include Self-Updating Apps (+\(store.greedyOnlyOutdatedCount))")
+                            : tr("检测应用内自更新软件", "偵測應用內自更新軟體", "Include Self-Updating Apps"),
+                        isOn: $store.includeGreedyOutdated
+                    )
 
-                Toggle(
-                    store.greedyOnlyOutdatedCount > 0
-                        ? tr("含自更新 (--greedy +\(store.greedyOnlyOutdatedCount))", "含自更新 (--greedy +\(store.greedyOnlyOutdatedCount))", "Greedy (+\(store.greedyOnlyOutdatedCount))")
-                        : tr("含自更新 (--greedy)", "含自更新 (--greedy)", "Greedy (--greedy)"),
-                    isOn: $store.includeGreedyOutdated
-                )
-                .toggleStyle(.switch)
+                    Toggle(
+                        tr("显示底层运行依赖库", "顯示底層執行依賴函式庫", "Show Underlying Libraries"),
+                        isOn: $store.showAllDependencies
+                    )
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "slider.horizontal.3")
+                        Text(tr("筛选选项", "篩選選項", "Options"))
+                        if store.includeGreedyOutdated || store.showAllDependencies {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                }
+                .menuStyle(.borderedButton)
                 .controlSize(.small)
-                .help(tr("开启后将额外检测带有内置自动更新 (auto_updates) 或 :latest 标签的 Cask 应用是否有新版本", "開啟後將額外偵測帶有內建自動更新 (auto_updates) 或 :latest 標籤的 Cask 應用是否有新版本", "When enabled, also checks Casks with built-in auto_updates or :latest version tags"))
+                .fixedSize()
 
                 Spacer()
 
                 HStack(spacing: 8) {
                     Button {
-                        Task { await store.refreshInstalled() }
-                    } label: {
-                        Label(tr("刷新列表", "重新整理", "Refresh"), systemImage: "arrow.clockwise")
-                    }
-                    .disabled(store.isLoadingInstalled)
-
-                    Button {
                         store.checkUpdates()
                     } label: {
-                        Label(tr("检查更新", "檢查更新", "Check Updates"), systemImage: "icloud.and.arrow.down")
+                        Label(tr("检查更新", "檢查更新", "Check Updates"), systemImage: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(store.isLoadingInstalled)
 
                     Button {
                         store.upgradeAll()
                     } label: {
                         if store.outdatedCount > 0 {
                             Label(
-                                tr("全部升级 (\(store.outdatedCount))", "全部升級 (\(store.outdatedCount))", "Upgrade All (\(store.outdatedCount))"),
+                                tr("全部更新 (\(store.outdatedCount))", "全部更新 (\(store.outdatedCount))", "Update All (\(store.outdatedCount))"),
                                 systemImage: "arrow.up.circle.fill"
                             )
                         } else {
                             Label(
-                                tr("全部升级", "全部升級", "Upgrade All"),
+                                tr("全部更新", "全部更新", "Update All"),
                                 systemImage: "arrow.up.circle"
                             )
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
             }
             .padding(.horizontal, 16)
@@ -129,12 +140,12 @@ public struct InstalledView: View {
 
             Divider()
 
-            // Search & Summary Sub-bar
+            // Search & Contextual Summary Sub-bar
             HStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                 TextField(
-                    tr("在已安装包中筛选名称或描述…", "在已安裝套件中篩選名稱或描述…", "Filter installed packages by name or description…"),
+                    tr("在已安装软件中搜索名称、中文名或功能描述…", "在已安裝軟體中搜尋名稱、中文名或功能描述…", "Filter installed apps or tools…"),
                     text: $store.installedSearchText
                 )
                 .textFieldStyle(.plain)
@@ -150,19 +161,43 @@ public struct InstalledView: View {
 
                 Spacer()
 
-                Text(
-                    tr(
-                        "共显示 \(filteredPackages.count) / \(store.installedPackages.count) 个包",
-                        "共顯示 \(filteredPackages.count) / \(store.installedPackages.count) 個套件",
-                        "Showing \(filteredPackages.count) / \(store.installedPackages.count) packages"
+                if !store.includeGreedyOutdated && store.greedyOnlyOutdatedCount > 0 {
+                    Button {
+                        store.includeGreedyOutdated = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                            Text(
+                                tr(
+                                    "另有 \(store.greedyOnlyOutdatedCount) 款内置自更新软件有新版，点击一并显示",
+                                    "另有 \(store.greedyOnlyOutdatedCount) 款內建自更新軟體有新版，點擊一併顯示",
+                                    "+\(store.greedyOnlyOutdatedCount) self-updating apps have new versions — click to show"
+                                )
+                            )
+                        }
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.indigo.opacity(0.12))
+                        .foregroundStyle(.indigo)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(
+                        tr(
+                            "共 \(filteredPackages.count) 款软件",
+                            "共 \(filteredPackages.count) 款軟體",
+                            "\(filteredPackages.count) items"
+                        )
                     )
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+            .padding(.vertical, 7)
+            .background(Color(nsColor: .controlBackgroundColor))
 
             Divider()
 
@@ -178,22 +213,117 @@ public struct InstalledView: View {
                 .background(Color.orange.opacity(0.12))
             }
 
+            // Contextual Adopt Callout in InstalledView (educates users where they manage apps)
+            if !store.activeAdoptCandidates.isEmpty
+                && !store.isInstalledAdoptBannerDismissed
+                && store.installedSearchText.isEmpty
+                && (store.installedCategory == .all || store.installedCategory == .casks) {
+                let previewCandidates = Array(store.activeAdoptCandidates.prefix(4))
+                let recommendedCount = store.activeAdoptCandidates.filter { !$0.isSuggestedToIgnore }.count
+                HStack(spacing: 12) {
+                    HStack(spacing: -6) {
+                        ForEach(previewCandidates) { cand in
+                            let hasDiskIcon = FileManager.default.fileExists(atPath: cand.appPath)
+                            PackageIconView(
+                                token: cand.caskToken,
+                                type: .cask,
+                                desc: cand.desc,
+                                appPath: hasDiskIcon ? cand.appPath : nil,
+                                size: 24
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
+                            )
+                        }
+                    }
+
+                    Text(
+                        recommendedCount > 0
+                            ? tr(
+                                "本机还有 \(store.activeAdoptCandidates.count) 款手动安装的应用（其中 \(recommendedCount) 款推荐纳入）可交由 BrewGUI 统一更新",
+                                "本機還有 \(store.activeAdoptCandidates.count) 款手動安裝的應用（其中 \(recommendedCount) 款推薦納入）可交由 BrewGUI 統一更新",
+                                "\(store.activeAdoptCandidates.count) manually installed apps on this Mac (\(recommendedCount) recommended) can be managed here"
+                            )
+                            : tr(
+                                "本机还有 \(store.activeAdoptCandidates.count) 款手动安装的应用可纳入统一更新管理",
+                                "本機還有 \(store.activeAdoptCandidates.count) 款手動安裝的應用可納入統一更新管理",
+                                "\(store.activeAdoptCandidates.count) manually installed apps on this Mac can be managed here"
+                            )
+                    )
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary.opacity(0.9))
+                    .lineLimit(1)
+
+                    Spacer()
+
+                    Button {
+                        store.selectedTab = .search
+                        store.catalogTypeFilter = .adoptable
+                    } label: {
+                        Text(tr("前往纳入管理 →", "前往納入管理 →", "Review & Adopt →"))
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.teal)
+                    .controlSize(.mini)
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            store.isInstalledAdoptBannerDismissed = true
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(tr("本次隐藏此提示", "本次隱藏此提示", "Dismiss"))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.teal.opacity(0.08))
+
+                Divider()
+            }
+
             // Package List
             if store.isLoadingInstalled && store.installedPackages.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text(tr("正在读取已安装的 Homebrew 软件包…", "正在讀取已安裝的 Homebrew 軟體套件…", "Loading installed Homebrew packages…"))
+                    Text(tr("正在读取本机已纳管的软件列表…", "正在讀取本機已納管的軟體列表…", "Loading managed software list…"))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if filteredPackages.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "shippingbox")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.secondary)
-                    Text(tr("没有符合筛选条件的软件包", "沒有符合篩選條件的軟體套件", "No packages match the current filter"))
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 12) {
+                    Image(systemName: store.installedCategory == .outdated ? "checkmark.seal.fill" : "shippingbox")
+                        .font(.system(size: 38))
+                        .foregroundStyle(store.installedCategory == .outdated ? .green : .secondary)
+                    Text(
+                        store.installedCategory == .outdated
+                            ? tr("所有软件均为最新版本", "所有軟體均為最新版本", "All software is up to date")
+                            : tr("没有符合当前筛选条件的软件", "沒有符合目前篩選條件的軟體", "No software matches the current filter")
+                    )
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
+                    if store.installedCategory == .outdated && !store.includeGreedyOutdated && store.greedyOnlyOutdatedCount > 0 {
+                        Button {
+                            store.includeGreedyOutdated = true
+                        } label: {
+                            Label(
+                                tr(
+                                    "查看 \(store.greedyOnlyOutdatedCount) 款支持应用内自更新的软件新版",
+                                    "檢視 \(store.greedyOnlyOutdatedCount) 款支援應用內自更新的軟體新版",
+                                    "Show \(store.greedyOnlyOutdatedCount) updates for self-updating apps"
+                                ),
+                                systemImage: "sparkles"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -203,12 +333,18 @@ public struct InstalledView: View {
                         pkg: pkg,
                         includeGreedy: store.includeGreedyOutdated,
                         probedSizeBytes: (isEffectivelyOutdated || pkg.hasBundleVersionMismatch) ? store.sizeBytes(for: pkg.name) : nil,
+                        isRunningTask: store.isPackageCurrentlyRunning(pkg.name),
+                        isQueuedTask: store.isPackageQueued(pkg.name),
+                        downloadProgress: store.isPackageCurrentlyRunning(pkg.name) ? store.activeDownloadInfo?.progressFraction : nil,
                         onUpgrade: { store.upgradePackage(pkg) },
                         onTogglePin: { store.togglePin(pkg) },
                         onRemoveQuarantine: { store.removeQuarantine(for: pkg) },
-                        onUninstall: { store.packagePendingUninstall = pkg }
+                        onUninstall: { store.packagePendingUninstall = pkg },
+                        onOpenApp: { path in store.openInstalledApp(at: path) },
+                        onRevealInFinder: { path in store.revealPathInFinder(path) },
+                        onInspectDetail: { store.inspectPackage(pkg) }
                     )
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 5)
                 }
                 .listStyle(.inset)
             }
@@ -227,16 +363,16 @@ public struct InstalledView: View {
         ) {
             if let pkg = store.packagePendingUninstall {
                 if pkg.type == .cask {
-                    Button(tr("普通卸载 (仅移除 /Applications 应用)", "一般解除安裝 (僅移除 /Applications 應用)", "Standard Uninstall (remove app only)"), role: .destructive) {
-                        store.uninstallPackage(pkg, zap: false)
-                        store.packagePendingUninstall = nil
-                    }
-                    Button(tr("彻底卸载 (--zap 含配置与缓存残留)", "徹底解除安裝 (--zap 含設定與快取殘留)", "Thorough Uninstall (--zap including prefs & caches)"), role: .destructive) {
+                    Button(tr("彻底卸载（同时清理配置与缓存残留）", "徹底解除安裝（同時清理設定與快取殘留）", "Complete Uninstall (remove app, preferences & caches)"), role: .destructive) {
                         store.uninstallPackage(pkg, zap: true)
                         store.packagePendingUninstall = nil
                     }
+                    Button(tr("仅移除应用（保留个人配置数据）", "僅移除應用（保留個人設定資料）", "Remove App Only (keep personal settings)"), role: .destructive) {
+                        store.uninstallPackage(pkg, zap: false)
+                        store.packagePendingUninstall = nil
+                    }
                 } else {
-                    Button("\(tr("卸载", "解除安裝", "Uninstall")) \(pkg.displayName)", role: .destructive) {
+                    Button("\(tr("确认卸载", "確認解除安裝", "Uninstall")) \(pkg.displayName)", role: .destructive) {
                         store.uninstallPackage(pkg, zap: false)
                         store.packagePendingUninstall = nil
                     }
@@ -250,17 +386,17 @@ public struct InstalledView: View {
                 if pkg.type == .cask {
                     Text(
                         tr(
-                            "「普通卸载」执行 `brew uninstall --cask \(pkg.name)`；「彻底卸载」额外附加 `--zap` 参数清理 ~/Library 下的关联配置与缓存。",
-                            "「一般解除安裝」執行 `brew uninstall --cask \(pkg.name)`；「徹底解除安裝」額外附加 `--zap` 參數清理 ~/Library 下的關聯設定與快取。",
-                            "Standard uninstall runs `brew uninstall --cask \(pkg.name)`; Thorough uninstall adds `--zap` to also remove related preferences and caches in ~/Library."
+                            "「彻底卸载」在移除应用程序的同时，会将该软件在个人目录下的缓存与配置文件一并移至废纸篓；「仅移除应用」则保留个人配置以便日后重装。",
+                            "「徹底解除安裝」在移除應用程式的同時，會將該軟體在個人目錄下的快取與設定檔一併移至垃圾桶；「僅移除應用」則保留個人設定以便日後重裝。",
+                            "Complete Uninstall also moves associated user preferences and caches to the Trash; Remove App Only keeps your personal configuration."
                         )
                     )
                 } else {
                     Text(
                         tr(
-                            "将执行 `brew uninstall \(pkg.name)`。",
-                            "將執行 `brew uninstall \(pkg.name)`。",
-                            "Will execute `brew uninstall \(pkg.name)`."
+                            "将从本机移除命令行工具 \(pkg.displayName)。",
+                            "將從本機移除命令列工具 \(pkg.displayName)。",
+                            "Will remove the command-line tool \(pkg.displayName) from your Mac."
                         )
                     )
                 }
@@ -273,177 +409,245 @@ private struct InstalledPackageRow: View {
     let pkg: BrewPackage
     let includeGreedy: Bool
     let probedSizeBytes: Int64?
+    let isRunningTask: Bool
+    let isQueuedTask: Bool
+    let downloadProgress: Double?
     let onUpgrade: () -> Void
     let onTogglePin: () -> Void
     let onRemoveQuarantine: () -> Void
     let onUninstall: () -> Void
+    let onOpenApp: (String) -> Void
+    let onRevealInFinder: (String) -> Void
+    let onInspectDetail: () -> Void
 
     private var isEffectivelyOutdated: Bool {
         pkg.isOutdated || (includeGreedy && pkg.isGreedyOutdated)
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Left Info
+        HStack(alignment: .center, spacing: 14) {
+            // 1. Visual Icon Anchor
+            Button {
+                onInspectDetail()
+            } label: {
+                PackageIconView(
+                    token: pkg.name,
+                    type: pkg.type,
+                    desc: pkg.desc,
+                    appPath: pkg.resolvedAppPath,
+                    size: 38
+                )
+            }
+            .buttonStyle(.plain)
+
+            // 2. Clean Title + Localized Description + Version Line
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(pkg.displayName)
-                        .font(.system(.body, design: .default).weight(.semibold))
-
-                    if pkg.displayName != pkg.name {
-                        Text("(\(pkg.name))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Button {
+                        onInspectDetail()
+                    } label: {
+                        Text(pkg.displayName)
+                            .font(.system(.body, design: .default).weight(.semibold))
                     }
-
-                    BadgeView(
-                        text: pkg.type.rawValue,
-                        color: pkg.type == .cask ? .purple : .blue
-                    )
+                    .buttonStyle(.plain)
 
                     if let tap = pkg.tap, !tap.isEmpty {
-                        BadgeView(text: "Tap: \(tap)", color: .indigo)
+                        BadgeView(text: tr("第三方源", "第三方源", "3rd-Party"), color: .indigo)
                     }
 
                     if !pkg.isTopLevel {
-                        BadgeView(text: tr("依赖包", "依賴套件", "Dependency"), color: .gray)
+                        BadgeView(text: tr("底层依赖", "底層依賴", "Library"), color: .gray)
                     }
 
                     if pkg.isPinned {
-                        BadgeView(text: tr("已锁定 (Pinned)", "已鎖定 (Pinned)", "Pinned"), color: .orange)
-                    }
-
-                    if !pkg.isOutdated && pkg.isGreedyOutdated && includeGreedy {
-                        BadgeView(text: tr("内置自更新 (Greedy)", "內建自更新 (Greedy)", "Auto-Updates (Greedy)"), color: .indigo)
+                        BadgeView(text: tr("🔒 已固定版本", "🔒 已固定版本", "🔒 Pinned"), color: .orange)
                     }
 
                     if pkg.isAppBundleMissingOnDisk {
-                        BadgeView(text: tr("应用已移除 (仅存账面记录)", "應用已移除 (僅存帳面記錄)", "App bundle removed"), color: .orange)
+                        BadgeView(text: tr("应用已从磁盘移走", "應用已從磁碟移走", "App Removed from Disk"), color: .orange)
                     } else if pkg.hasBundleVersionMismatch {
-                        BadgeView(text: tr("本地未覆盖 (需同步更新)", "本機未覆蓋 (需同步更新)", "On-disk mismatch (Needs sync)"), color: .orange)
+                        BadgeView(text: tr("版本需同步覆盖", "版本需同步覆蓋", "Needs Sync"), color: .orange)
                     }
 
                     if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
                         let isLarge = sizeBytes >= 150 * 1024 * 1024
                         BadgeView(
-                            text: isLarge
-                                ? "📦 \(AppConstants.formatBytes(sizeBytes)) \(tr("(大体积包，建议单独升级)", "(大體積套件，建議單獨升級)", "(Large installer)"))"
-                                : "📦 \(AppConstants.formatBytes(sizeBytes))",
+                            text: "📦 \(AppConstants.formatBytes(sizeBytes))",
                             color: isLarge ? .orange : .teal
                         )
                     }
                 }
 
-                if !pkg.desc.isEmpty {
-                    Text(pkg.desc)
+                let localizedDesc = ChineseSearchIndex.localizedDescription(for: pkg)
+                if !localizedDesc.isEmpty {
+                    Text(localizedDesc)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    Text(pkg.type.localizedHumanLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
                     if pkg.hasBundleVersionMismatch && !isEffectivelyOutdated {
                         HStack(spacing: 4) {
-                            Text("\(tr("实际应用", "實際應用", "On-disk")): \(pkg.actualBundleVersion ?? "?")")
-                                .font(.caption.monospaced())
+                            Text("\(tr("本机实际", "本機實際", "On Mac")): \(pkg.actualBundleVersion ?? "?")")
+                                .font(.caption2.monospaced())
                                 .foregroundStyle(.orange)
                             Image(systemName: "arrow.right")
-                                .font(.caption2)
+                                .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.orange)
-                            Text("\(tr("Brew 账面", "Brew 帳面", "Brew Cask")): \(pkg.latestVersion)")
-                                .font(.caption.monospaced().weight(.semibold))
+                            Text("\(tr("可同步至", "可同步至", "Sync to")): \(pkg.latestVersion)")
+                                .font(.caption2.monospaced().weight(.semibold))
                                 .foregroundStyle(.orange)
                         }
                     } else if isEffectivelyOutdated {
                         HStack(spacing: 4) {
                             Text(pkg.installedVersion ?? "")
-                                .font(.caption.monospaced())
+                                .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
                             Image(systemName: "arrow.right")
-                                .font(.caption2)
+                                .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.orange)
                             Text(pkg.latestVersion)
-                                .font(.caption.monospaced().weight(.semibold))
+                                .font(.caption2.monospaced().weight(.semibold))
                                 .foregroundStyle(.orange)
                         }
                     } else {
-                        Text("\(tr("版本", "版本", "Version")): \(pkg.installedVersion ?? pkg.latestVersion)")
-                            .font(.caption.monospaced())
+                        Text("v\(pkg.installedVersion ?? pkg.latestVersion)")
+                            .font(.caption2.monospaced())
                             .foregroundStyle(.secondary)
-                    }
-
-                    if let url = URL(string: pkg.homepage), !pkg.homepage.isEmpty {
-                        Link(destination: url) {
-                            HStack(spacing: 2) {
-                                Text(tr("主页", "首頁", "Homepage"))
-                                Image(systemName: "arrow.up.right.square")
-                            }
-                            .font(.caption)
-                        }
                     }
                 }
             }
 
             Spacer()
 
-            // Right Actions
+            // 3. Contextual Right Actions (No Icon Clutter)
             HStack(spacing: 8) {
-                if isEffectivelyOutdated || pkg.hasBundleVersionMismatch {
-                    Button {
-                        onUpgrade()
-                    } label: {
-                        Label(
-                            pkg.hasBundleVersionMismatch && !isEffectivelyOutdated
-                                ? tr("覆盖升级", "覆蓋升級", "Force Sync")
-                                : tr("升级", "升級", "Upgrade"),
-                            systemImage: "arrow.up.circle.fill"
-                        )
+                if isRunningTask {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        if let frac = downloadProgress {
+                            Text("\(Int(frac * 100))%")
+                                .font(.caption.monospaced().weight(.semibold))
+                                .foregroundStyle(.blue)
+                        } else {
+                            Text(tr("更新中…", "更新中…", "Updating…"))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
-                    .controlSize(.small)
-                    .disabled(pkg.isPinned)
-                    .help(
-                        pkg.hasBundleVersionMismatch && !isEffectivelyOutdated
-                            ? tr("之前使用 --adopt 仅认领了旧版应用而未替换文件，点击将自动退出旧应用并执行 brew reinstall --cask --force 覆盖升级至 \(pkg.latestVersion)", "之前使用 --adopt 僅認領了舊版應用而未替換檔案，點擊將自動結束舊應用並執行 brew reinstall --cask --force 覆蓋升級至 \(pkg.latestVersion)", "Previously adopted without overwriting files. Click to quit running app and run brew reinstall --cask --force to update to \(pkg.latestVersion)")
-                            : "\(tr("升级", "升級", "Upgrade")) \(pkg.displayName)"
-                    )
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.1))
+                    .clipShape(Capsule())
+                } else if isQueuedTask {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text(tr("排队中", "排隊中", "Queued"))
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                } else {
+                    if isEffectivelyOutdated || pkg.hasBundleVersionMismatch {
+                        Button {
+                            onUpgrade()
+                        } label: {
+                            Label(
+                                pkg.hasBundleVersionMismatch && !isEffectivelyOutdated
+                                    ? tr("同步更新", "同步更新", "Sync")
+                                    : tr("更新", "更新", "Update"),
+                                systemImage: "arrow.up.circle.fill"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .controlSize(.small)
+                        .disabled(pkg.isPinned)
+                    } else if let appPath = pkg.resolvedAppPath {
+                        Button {
+                            onOpenApp(appPath)
+                        } label: {
+                            Label(tr("打开", "打開", "Open"), systemImage: "play.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                 }
 
-                if pkg.type == .formula {
+                // Secondary Actions Consolidated into Clean `···` Menu
+                Menu {
                     Button {
-                        onTogglePin()
+                        onInspectDetail()
                     } label: {
-                        Image(systemName: pkg.isPinned ? "pin.slash.fill" : "pin")
+                        Label(tr("查看详情与配置说明", "檢視詳情與設定說明", "Details & Notes"), systemImage: "info.circle")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help(pkg.isPinned ? tr("解锁版本 (brew unpin)", "解鎖版本 (brew unpin)", "Unpin version (brew unpin)") : tr("锁定当前版本防止升级 (brew pin)", "鎖定目前版本防止升級 (brew pin)", "Pin version to prevent upgrades (brew pin)"))
-                } else if !pkg.appBundles.isEmpty && !pkg.isAppBundleMissingOnDisk {
-                    Button {
-                        onRemoveQuarantine()
-                    } label: {
-                        Image(systemName: "checkmark.shield")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help(
-                        tr(
-                            "解除系统隔离属性 (xattr -dr com.apple.quarantine，修复打开时提示“已损坏/无法验证开发者”)",
-                            "解除系統隔離屬性 (xattr -dr com.apple.quarantine，修復開啟時提示「已損毀/無法驗證開發者」)",
-                            "Remove Gatekeeper quarantine attribute (xattr -dr com.apple.quarantine to fix 'damaged/unverified developer' prompt)"
-                        )
-                    )
-                }
 
-                Button(role: .destructive) {
-                    onUninstall()
+                    if let appPath = pkg.resolvedAppPath {
+                        Button {
+                            onOpenApp(appPath)
+                        } label: {
+                            Label(tr("打开应用", "打開應用", "Open App"), systemImage: "play")
+                        }
+
+                        Button {
+                            onRevealInFinder(appPath)
+                        } label: {
+                            Label(tr("在 Finder 中显示", "在 Finder 中顯示", "Show in Finder"), systemImage: "folder")
+                        }
+                    }
+
+                    if let url = URL(string: pkg.homepage), !pkg.homepage.isEmpty {
+                        Link(destination: url) {
+                            Label(tr("访问软件主页", "造訪軟體首頁", "Visit Website"), systemImage: "safari")
+                        }
+                    }
+
+                    Divider()
+
+                    if pkg.type == .formula {
+                        Button {
+                            onTogglePin()
+                        } label: {
+                            Label(
+                                pkg.isPinned
+                                    ? tr("取消固定版本（允许更新）", "取消固定版本（允許更新）", "Unpin Version")
+                                    : tr("固定当前版本（跳过更新）", "固定目前版本（略過更新）", "Pin Current Version"),
+                                systemImage: pkg.isPinned ? "pin.slash" : "pin"
+                            )
+                        }
+                    } else if !pkg.appBundles.isEmpty && !pkg.isAppBundleMissingOnDisk {
+                        Button {
+                            onRemoveQuarantine()
+                        } label: {
+                            Label(
+                                tr("解除“已损坏”安全拦截", "解除「已損毀」安全攔截", "Remove Gatekeeper Quarantine"),
+                                systemImage: "checkmark.shield"
+                            )
+                        }
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        onUninstall()
+                    } label: {
+                        Label(tr("卸载…", "解除安裝…", "Uninstall…"), systemImage: "trash")
+                    }
                 } label: {
-                    Image(systemName: "trash")
+                    Image(systemName: "ellipsis.circle")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("\(tr("卸载", "解除安裝", "Uninstall")) \(pkg.name)")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(tr("更多操作", "更多操作", "More Actions"))
             }
         }
     }

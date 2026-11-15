@@ -10,25 +10,37 @@ public enum NavigationTab: String, CaseIterable, Identifiable {
 
     public var id: String { rawValue }
 
+    public static let primaryTabs: [NavigationTab] = [.search, .installed, .maintenance]
+    public static let toolTabs: [NavigationTab] = [.batchInstall]
+
     public var localizedTitle: String {
         switch self {
         case .search:
-            return tr("搜索与安装", "搜尋與安裝", "Search & Install")
+            return tr("发现与安装", "探索與安裝", "Discover & Install")
         case .installed:
             return tr("已安装与更新", "已安裝與更新", "Installed & Updates")
         case .maintenance:
-            return tr("清理与维护", "清理與維護", "Cleanup & Maintenance")
+            return tr("清理与维护", "清理與維護", "Cleanup & Health")
         case .batchInstall:
-            return tr("批量安装", "批次安裝", "Batch Install")
+            return tr("批量与迁移", "批次與遷移", "Batch & Migrate")
         }
     }
 
     public var iconName: String {
         switch self {
-        case .search: return "magnifyingglass"
+        case .search: return "sparkles.rectangle.stack.fill"
         case .installed: return "shippingbox.fill"
-        case .maintenance: return "sparkles"
-        case .batchInstall: return "list.bullet.clipboard.fill"
+        case .maintenance: return "wand.and.stars"
+        case .batchInstall: return "arrow.left.arrow.right.square.fill"
+        }
+    }
+
+    public var tintColor: Color {
+        switch self {
+        case .search: return .blue
+        case .installed: return .indigo
+        case .maintenance: return .purple
+        case .batchInstall: return .teal
         }
     }
 }
@@ -60,9 +72,9 @@ public struct MainWindowView: View {
                                     .foregroundStyle(.orange)
                                 Text(
                                     tr(
-                                        "BrewGUI 尚未获得「App 管理权限」，更新或卸载 `/Applications` 下的 Cask 应用时可能会被系统拦截。",
-                                        "BrewGUI 尚未取得「App 管理權限」，更新或解除安裝 `/Applications` 下的 Cask 應用時可能會被系統攔截。",
-                                        "BrewGUI does not have \"App Management\" permission yet. Updating or uninstalling Cask apps in `/Applications` may be blocked by macOS."
+                                        "BrewGUI 尚未获得「App 管理权限」，更新或卸载应用程序目录中的软件时可能会被系统拦截。",
+                                        "BrewGUI 尚未取得「App 管理權限」，更新或解除安裝應用程式目錄中的軟體時可能會被系統攔截。",
+                                        "BrewGUI does not have \"App Management\" permission yet. Updating or uninstalling apps in `/Applications` may be blocked by macOS."
                                     )
                                 )
                                 .font(.caption)
@@ -105,6 +117,10 @@ public struct MainWindowView: View {
                     }
                 }
                 .frame(minWidth: 920, minHeight: 580)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .sheet(item: $store.inspectedTarget) { target in
+                    PackageDetailSheetView(store: store, target: target)
+                }
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button {
@@ -132,59 +148,32 @@ private struct SidebarRailView: View {
     @ObservedObject var store: BrewStore
 
     var body: some View {
-        VStack(spacing: 6) {
-            ForEach(NavigationTab.allCases) { tab in
-                let isSelected = (store.selectedTab == tab)
-                Button {
-                    store.selectedTab = tab
-                } label: {
-                    if store.isSidebarCollapsed {
-                        // Compact Icon-Only Mode (No text, no badge numbers)
-                        Image(systemName: tab.iconName)
-                            .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-                            .frame(width: 36, height: 36)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
-                            )
-                    } else {
-                        // Expanded Mode with Text & Badges
-                        HStack(spacing: 8) {
-                            Image(systemName: tab.iconName)
-                                .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
-                                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                                .frame(width: 18)
+        VStack(alignment: .leading, spacing: 6) {
+            if !store.isSidebarCollapsed {
+                Text(tr("日常管理", "日常管理", "DAILY"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 2)
+            }
 
-                            Text(tab.localizedTitle)
-                                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                                .foregroundStyle(Color.primary)
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
+            ForEach(NavigationTab.primaryTabs) { tab in
+                sidebarButton(for: tab)
+            }
 
-                            Spacer(minLength: 4)
+            if store.isSidebarCollapsed {
+                Divider()
+                    .padding(.vertical, 4)
+            } else {
+                Text(tr("装机与迁移", "裝機與遷移", "MIGRATION"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 10)
+            }
 
-                            if tab == .installed && store.outdatedCount > 0 {
-                                BadgeView(text: "\(store.outdatedCount)", color: .orange)
-                                    .fixedSize()
-                            } else if tab == .search && !store.activeAdoptCandidates.isEmpty {
-                                BadgeView(text: "\(store.activeAdoptCandidates.count)", color: .teal)
-                                    .fixedSize()
-                            } else if tab == .maintenance && (store.totalCachedDownloadsBytes + store.totalLeftoversBytes) >= 100 * 1024 * 1024 {
-                                BadgeView(text: AppConstants.formatBytes(store.totalCachedDownloadsBytes + store.totalLeftoversBytes), color: .purple)
-                                    .fixedSize()
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-                        )
-                    }
-                }
-                .buttonStyle(.plain)
-                .help(tab.localizedTitle)
+            ForEach(NavigationTab.toolTabs) { tab in
+                sidebarButton(for: tab)
             }
 
             Spacer()
@@ -193,14 +182,12 @@ private struct SidebarRailView: View {
             if !store.isSidebarCollapsed {
                 selfUpdateSidebarCard
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "bolt.horizontal.circle")
-                            .font(.caption2)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bolt.horizontal.circle.fill")
+                            .font(.caption)
                             .foregroundStyle(.teal)
-                        Text(tr("加速源:", "加速源:", "Mirror:"))
+                        Text(tr("下载源", "下載源", "Mirror"))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -230,14 +217,17 @@ private struct SidebarRailView: View {
                                 Label(tr("重新测速", "重新測速", "Re-probe Mirrors"), systemImage: "speedometer")
                             }
                         } label: {
-                            Text(store.mirrorSource == .auto ? "\(tr("自动", "自動", "Auto")) (\(store.resolvedMirror.shortLabel))" : store.mirrorSource.shortLabel)
+                            Text(store.mirrorSource == .auto ? "\(tr("自动", "自動", "Auto"))·\(store.resolvedMirror.shortLabel)" : store.mirrorSource.shortLabel)
                                 .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.primary.opacity(0.85))
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
                         .help(tr("切换 Homebrew 下载加速源（仅对 BrewGUI 子进程生效，不修改本地 .zshrc）", "切換 Homebrew 下載加速源（僅對 BrewGUI 子行程生效，不修改本機 .zshrc）", "Switch Homebrew Mirror (applies to BrewGUI subprocesses only)"))
                     }
+
+                    Divider()
+                        .opacity(0.5)
 
                     HStack(spacing: 6) {
                         Text("v\(AppConstants.versionString)")
@@ -290,7 +280,15 @@ private struct SidebarRailView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
             } else {
                 // Collapsed Icon-Only Footer: compact language menu
                 Menu {
@@ -305,7 +303,7 @@ private struct SidebarRailView: View {
                     Image(systemName: "globe")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 28)
+                        .frame(width: 36, height: 28)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -313,9 +311,76 @@ private struct SidebarRailView: View {
             }
         }
         .padding(.horizontal, store.isSidebarCollapsed ? 8 : 10)
-        .padding(.vertical, 10)
-        .frame(width: store.isSidebarCollapsed ? 52 : 212)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+        .padding(.vertical, 12)
+        .frame(width: store.isSidebarCollapsed ? 54 : 216)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func sidebarButton(for tab: NavigationTab) -> some View {
+        let isSelected = (store.selectedTab == tab)
+        let effectiveTint: Color = (tab == .installed && store.outdatedCount > 0) ? .orange : tab.tintColor
+
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                store.selectedTab = tab
+            }
+        } label: {
+            if store.isSidebarCollapsed {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isSelected ? effectiveTint : effectiveTint.opacity(0.14))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: tab.iconName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.white : effectiveTint)
+                }
+                .frame(width: 38, height: 38)
+            } else {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isSelected ? effectiveTint : effectiveTint.opacity(0.15))
+                            .frame(width: 26, height: 26)
+                        Image(systemName: tab.iconName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(isSelected ? Color.white : effectiveTint)
+                    }
+
+                    Text(tab.localizedTitle)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer(minLength: 4)
+
+                    if tab == .installed && store.outdatedCount > 0 {
+                        BadgeView(text: "\(store.outdatedCount)", color: .orange)
+                            .fixedSize()
+                    } else if tab == .search && !store.activeAdoptCandidates.isEmpty {
+                        BadgeView(text: "\(store.activeAdoptCandidates.count)", color: .teal)
+                            .fixedSize()
+                    } else if tab == .maintenance && (store.totalCachedDownloadsBytes + store.totalLeftoversBytes) >= 100 * 1024 * 1024 {
+                        BadgeView(text: AppConstants.formatBytes(store.totalCachedDownloadsBytes + store.totalLeftoversBytes), color: .purple)
+                            .fixedSize()
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(isSelected ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor))
+                        .shadow(color: Color.black.opacity(isSelected ? 0.06 : 0), radius: 3, x: 0, y: 1)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(isSelected ? 0.09 : 0), lineWidth: 1)
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .help(tab.localizedTitle)
     }
 
     @ViewBuilder

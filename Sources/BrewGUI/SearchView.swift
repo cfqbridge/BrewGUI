@@ -3,8 +3,8 @@ import AppKit
 
 public enum SearchTypeFilter: String, CaseIterable, Identifiable {
     case all = "全部"
-    case formulae = "Formula (命令行)"
-    case casks = "Cask (图形应用)"
+    case casks = "桌面应用"
+    case formulae = "命令行"
     case adoptable = "本机可接管"
 
     public var id: String { rawValue }
@@ -13,12 +13,12 @@ public enum SearchTypeFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all:
             return tr("全部", "全部", "All")
-        case .formulae:
-            return tr("Formula (命令行)", "Formula (命令列)", "Formula (CLI)")
         case .casks:
-            return tr("Cask (图形应用)", "Cask (圖形應用)", "Cask (GUI Apps)")
+            return tr("桌面应用", "桌面應用", "Desktop Apps")
+        case .formulae:
+            return tr("命令行", "命令列", "CLI Tools")
         case .adoptable:
-            return tr("本机可接管", "本機可接管", "Adoptable")
+            return tr("本机可接管", "本機可接管", "On This Mac")
         }
     }
 }
@@ -39,8 +39,8 @@ public struct SearchView: View {
                         .foregroundStyle(.secondary)
                     TextField(
                         store.catalogTypeFilter == .adoptable
-                            ? tr("筛选本机可接管应用名称、中文名或 Cask Token…", "篩選本機可接管應用程式名稱、中文名或 Cask Token…", "Filter adoptable apps or Cask tokens…")
-                            : tr("搜索包名、中文名或功能词（如：截图、解压、播放器、翻译、终端、微信）…", "搜尋套件名、中文名或功能詞（如：截圖、解壓、播放器、翻譯、終端、微信）…", "Search Formulae or Casks (by name, Chinese alias, or functional keyword)…"),
+                            ? tr("筛选本机可接管应用名称或中文名…", "篩選本機可接管應用程式名稱或中文名…", "Filter unmanaged local apps…")
+                            : tr("搜索软件名、中文别名或功能词（如：截图、解压、播放器、翻译、终端、微信）…", "搜尋軟體名、中文別名或功能詞（如：截圖、解壓、播放器、翻譯、終端、微信）…", "Search apps or tools (by name, Chinese alias, or functional keyword)…"),
                         text: $store.catalogSearchQuery
                     )
                     .textFieldStyle(.plain)
@@ -81,15 +81,15 @@ public struct SearchView: View {
                     } label: {
                         Label(tr("重新扫描", "重新掃描", "Rescan"), systemImage: "arrow.clockwise")
                     }
-                    .help(tr("重新扫描 /Applications 下的本地应用", "重新掃描 /Applications 下的本機應用程式", "Rescan local applications in /Applications"))
+                    .help(tr("重新扫描本机已安装的桌面应用", "重新掃描本機已安裝的桌面應用程式", "Rescan local applications"))
                 } else {
                     Button {
                         Task { await store.refreshCatalog(forceRebuild: true) }
                     } label: {
-                        Label(tr("重建索引", "重建索引", "Rebuild Index"), systemImage: "arrow.triangle.2.circlepath")
+                        Image(systemName: "arrow.triangle.2.circlepath")
                     }
                     .disabled(store.isLoadingCatalog)
-                    .help(tr("从本地 Homebrew API 缓存重新生成全量搜索索引", "從本機 Homebrew API 快取重新產生全量搜尋索引", "Rebuild full search index from local Homebrew API cache"))
+                    .help(tr("刷新本地软件索引库", "重新整理本機軟體索引庫", "Refresh local package catalog"))
                 }
             }
             .padding(.horizontal, 16)
@@ -146,67 +146,111 @@ public struct SearchView: View {
             if store.isLoadingCatalog {
                 ProgressView()
                     .controlSize(.small)
-                Text(tr("正在构建本地全量元数据索引…", "正在建構本機全量中繼資料索引…", "Building local full catalog index…"))
+                Text(tr("正在更新本地软件索引库…", "正在更新本機軟體索引庫…", "Updating local package catalog…"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 let resultCount = store.filteredCatalogEntries.count
                 let totalCount = store.catalogEntries.count
-                Text(
-                    tr(
-                        "本地索引库共 \(totalCount) 个软件包 · 已内置中文别名与场景词典（显示前 \(resultCount) 条结果）",
-                        "本機索引庫共 \(totalCount) 個軟體套件 · 已內建中文別名與場景詞典（顯示前 \(resultCount) 筆結果）",
-                        "\(totalCount) packages indexed locally with bilingual alias & category tags (showing top \(resultCount) matches)"
+                let isBrowsingDefault = store.catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.selectedSearchCategory == .all
+                HStack(spacing: 5) {
+                    Image(systemName: isBrowsingDefault ? "sparkles" : "line.3.horizontal.decrease.circle")
+                        .font(.caption2)
+                        .foregroundStyle(isBrowsingDefault ? .orange : .secondary)
+                    Text(
+                        isBrowsingDefault
+                            ? tr("常用软件精选 · 共收录 \(totalCount) 款工具，支持中文功能词直接检索", "常用軟體精選 · 共收錄 \(totalCount) 款工具，支援中文功能詞直接檢索", "Featured Picks · \(totalCount) packages indexed")
+                            : tr("找到 \(resultCount) 款匹配的软件", "找到 \(resultCount) 款符合的軟體", "Found \(resultCount) matching packages")
                     )
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
             Spacer()
+
+            let isBrowsingDefaultToggle = store.catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.selectedSearchCategory == .all
+            if isBrowsingDefaultToggle {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        store.showAllDefaultCatalogList.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: store.showAllDefaultCatalogList ? "square.grid.2x2.fill" : "list.bullet")
+                        Text(
+                            store.showAllDefaultCatalogList
+                                ? tr("精选卡片视图", "精選卡片檢視", "Featured Grid")
+                                : tr("列表浏览", "列表瀏覽", "List View")
+                        )
+                    }
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
             if !store.activeAdoptCandidates.isEmpty {
                 Button {
                     store.catalogTypeFilter = .adoptable
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: "arrow.triangle.merge")
                         Text(
                             tr(
-                                "发现 \(store.activeAdoptCandidates.count) 个本机应用可一键接管，点击查看",
-                                "發現 \(store.activeAdoptCandidates.count) 個本機應用程式可一鍵接管，點擊查看",
-                                "\(store.activeAdoptCandidates.count) unmanaged local apps found for Cask Adopt — click to view"
+                                "本机可接管 (\(store.activeAdoptCandidates.count)) →",
+                                "本機可接管 (\(store.activeAdoptCandidates.count)) →",
+                                "On This Mac (\(store.activeAdoptCandidates.count)) →"
                             )
                         )
                     }
                     .font(.caption.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.teal.opacity(0.12))
                     .foregroundStyle(.teal)
+                    .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(Color(nsColor: .controlBackgroundColor))
 
         Divider()
+
+        let shouldShowFeaturedGrid = store.catalogSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && store.selectedSearchCategory == .all
+            && !store.showAllDefaultCatalogList
+            && (!store.featuredEssentialEntries.isEmpty || !store.featuredDeveloperEntries.isEmpty)
 
         if store.filteredCatalogEntries.isEmpty && !store.isLoadingCatalog {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 36))
                     .foregroundStyle(.secondary)
-                Text(tr("未找到匹配的软件包", "找不到符合的軟體套件", "No matching packages found"))
+                Text(tr("未找到匹配的软件", "找不到符合的軟體", "No matching packages found"))
                     .font(.headline)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if shouldShowFeaturedGrid {
+            discoveryShowcaseContent
         } else {
             List(store.filteredCatalogEntries) { entry in
                 let adoptApp = store.adoptableAppName(for: entry)
+                let installedPkg = store.installedPackage(for: entry)
                 SearchCatalogRow(
                     entry: entry,
-                    installedPkg: store.installedPackage(for: entry),
+                    installedPkg: installedPkg,
                     adoptableApp: adoptApp,
                     isLocalOlderThanCask: store.adoptCandidate(for: entry.name)?.isLocalOlderThanCask ?? false,
+                    isRunningTask: store.isPackageCurrentlyRunning(entry.name),
+                    isQueuedTask: store.isPackageQueued(entry.name),
+                    downloadProgress: store.isPackageCurrentlyRunning(entry.name) ? store.activeDownloadInfo?.progressFraction : nil,
                     onInstall: { store.installCatalogEntry(entry, forceOverwrite: adoptApp != nil) },
                     onAdopt: { forceUpgrade in
                         store.adoptCask(
@@ -217,11 +261,210 @@ public struct SearchView: View {
                         )
                     },
                     onIgnoreAdopt: { store.toggleIgnoreAdoptCandidate(caskToken: entry.name) },
-                    onSearchReplacement: { repl in store.catalogSearchQuery = repl }
+                    onSearchReplacement: { repl in store.catalogSearchQuery = repl },
+                    onOpenInstalledApp: { path in store.openInstalledApp(at: path) },
+                    onInspectDetail: { store.inspectCatalogEntry(entry) }
                 )
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
             }
             .listStyle(.inset)
+        }
+    }
+
+    @ViewBuilder
+    private var discoveryShowcaseContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // 1. Adoptable Apps Callout Card (if any local unmanaged apps exist)
+                if !store.activeAdoptCandidates.isEmpty {
+                    let previewCandidates = Array(store.activeAdoptCandidates.prefix(4))
+                    let recommendedCount = store.activeAdoptCandidates.filter { !$0.isSuggestedToIgnore }.count
+                    HStack(spacing: 14) {
+                        HStack(spacing: -8) {
+                            ForEach(previewCandidates) { cand in
+                                let hasDiskIcon = FileManager.default.fileExists(atPath: cand.appPath)
+                                PackageIconView(
+                                    token: cand.caskToken,
+                                    type: .cask,
+                                    desc: cand.desc,
+                                    appPath: hasDiskIcon ? cand.appPath : nil,
+                                    size: 32
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2)
+                                )
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text(
+                                    tr(
+                                        "发现本机有 \(store.activeAdoptCandidates.count) 款应用可纳入统一更新",
+                                        "發現本機有 \(store.activeAdoptCandidates.count) 款應用可納入統一更新",
+                                        "Found \(store.activeAdoptCandidates.count) Local Apps Ready for Unified Updates"
+                                    )
+                                )
+                                .font(.callout.weight(.semibold))
+
+                                if recommendedCount > 0 {
+                                    BadgeView(
+                                        text: tr("推荐纳入 \(recommendedCount) 款", "推薦納入 \(recommendedCount) 款", "\(recommendedCount) Recommended"),
+                                        color: .teal
+                                    )
+                                }
+                            }
+                            Text(
+                                tr(
+                                    "您之前通过安装包手动拖入「应用程序」的软件，可一键交由 BrewGUI 统一检测更新，无需重装。",
+                                    "您之前透過安裝包手動拖入「應用程式」的軟體，可一鍵交由 BrewGUI 統一偵測更新，無需重裝。",
+                                    "Apps you manually installed in /Applications can be adopted for one-click updates without reinstalling."
+                                )
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            store.catalogTypeFilter = .adoptable
+                        } label: {
+                            Label(tr("立即查看", "立即檢視", "Review Apps"), systemImage: "arrow.right.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
+                        .controlSize(.small)
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.teal.opacity(0.12), Color.blue.opacity(0.05)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.teal.opacity(0.24), lineWidth: 1)
+                    )
+                }
+
+                // 2. Essential Mac Apps Grid
+                if !store.featuredEssentialEntries.isEmpty {
+                    showcaseGridSection(
+                        icon: "flame.fill",
+                        iconColor: .orange,
+                        title: tr("Mac 装机必备精选", "Mac 裝機必備精選", "Essential Mac Picks"),
+                        subtitle: tr("口碑极佳的高频效率、影音、截图与系统增强工具", "口碑極佳的高頻效率、影音、截圖與系統增強工具", "Top-rated productivity, media, screenshot, and system utilities"),
+                        entries: store.featuredEssentialEntries
+                    )
+                }
+
+                // 3. Developer & AI Tools Grid
+                if !store.featuredDeveloperEntries.isEmpty {
+                    showcaseGridSection(
+                        icon: "cpu.fill",
+                        iconColor: .indigo,
+                        title: tr("开发者与 AI 效率利器", "開發者與 AI 效率利器", "Developer & AI Power Tools"),
+                        subtitle: tr("主流本地大模型客户端、现代终端与高频命令行工具", "主流本機大模型用戶端、現代終端與高頻命令列工具", "Popular AI desktop clients, modern terminals, and CLI essentials"),
+                        entries: store.featuredDeveloperEntries
+                    )
+                }
+
+                // 4. Footer Switch to Full List
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            store.showAllDefaultCatalogList = true
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "list.bullet.rectangle")
+                            Text(
+                                tr(
+                                    "切换为完整列表浏览（共收录 \(store.catalogEntries.count) 款软件）→",
+                                    "切換為完整列表瀏覽（共收錄 \(store.catalogEntries.count) 款軟體）→",
+                                    "Browse Full Package List (\(store.catalogEntries.count) packages) →"
+                                )
+                            )
+                        }
+                        .font(.callout.weight(.medium))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
+                }
+                .padding(.top, 4)
+                .padding(.bottom, 12)
+            }
+            .padding(16)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func showcaseGridSection(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String,
+        entries: [CatalogEntry]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(iconColor)
+                Text(title)
+                    .font(.headline)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+
+            let columns = [
+                GridItem(.flexible(minimum: 260), spacing: 12),
+                GridItem(.flexible(minimum: 260), spacing: 12)
+            ]
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(entries) { entry in
+                    let adoptApp = store.adoptableAppName(for: entry)
+                    let installedPkg = store.installedPackage(for: entry)
+                    FeaturedDiscoveryCard(
+                        entry: entry,
+                        installedPkg: installedPkg,
+                        adoptableApp: adoptApp,
+                        isLocalOlderThanCask: store.adoptCandidate(for: entry.name)?.isLocalOlderThanCask ?? false,
+                        isRunningTask: store.isPackageCurrentlyRunning(entry.name),
+                        isQueuedTask: store.isPackageQueued(entry.name),
+                        downloadProgress: store.isPackageCurrentlyRunning(entry.name) ? store.activeDownloadInfo?.progressFraction : nil,
+                        onInstall: { store.installCatalogEntry(entry, forceOverwrite: adoptApp != nil) },
+                        onAdopt: { forceUpgrade in
+                            store.adoptCask(
+                                token: entry.qualifiedName,
+                                displayName: entry.displayName,
+                                appBundles: entry.appBundles,
+                                forceOverwriteToUpgrade: forceUpgrade
+                            )
+                        },
+                        onOpenInstalledApp: { path in store.openInstalledApp(at: path) },
+                        onInspectDetail: { store.inspectCatalogEntry(entry) }
+                    )
+                }
+            }
         }
     }
 
@@ -229,75 +472,91 @@ public struct SearchView: View {
 
     @ViewBuilder
     private var adoptModeContent: some View {
-        // Caution & Explanation Banner with Visual Decision Guide & One-Click Ignore
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "info.circle.fill")
+        let recommendedCount = store.activeAdoptCandidates.filter { !$0.isSuggestedToIgnore }.count
+        let cautionOrIgnoreCount = store.suggestedIgnoreAdoptCandidates.count
+
+        // Compact Visual Summary Bar
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "macwindow.badge.plus")
+                    .font(.title3)
                     .foregroundStyle(.teal)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 4) {
+
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
-                        Text(tr("本机应用接管智能避坑提示 (`--adopt` vs `--force`)：", "本機應用程式接管智慧避坑提示 (`--adopt` vs `--force`)：", "Smart Cask Adopt Guide (`--adopt` vs `--force`):"))
-                            .font(.caption.weight(.semibold))
+                        Text(tr("将本机手动安装的应用纳入统一更新", "將本機手動安裝的應用納入統一更新", "Manage Existing Local Apps"))
+                            .font(.callout.weight(.semibold))
 
-                        Button {
-                            store.showAdoptGuideSheet = true
-                        } label: {
-                            Label(tr("📖 接管避坑图文指南 (哪些该忽略？)", "📖 接管避坑圖文指南 (哪些該忽略？)", "📖 Adopt Decision Guide (What to Ignore?)"), systemImage: "questionmark.circle.fill")
+                        if recommendedCount > 0 {
+                            BadgeView(
+                                text: tr("推荐纳入 \(recommendedCount) 款", "推薦納入 \(recommendedCount) 款", "\(recommendedCount) Recommended"),
+                                color: .teal
+                            )
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.teal)
-                        .controlSize(.mini)
-
-                        if !store.suggestedIgnoreAdoptCandidates.isEmpty {
-                            Button {
-                                store.ignoreAllSuggestedAdoptCandidates()
-                            } label: {
-                                Label(
-                                    tr(
-                                        "一键忽略 \(store.suggestedIgnoreAdoptCandidates.count) 个不推荐项",
-                                        "一鍵忽略 \(store.suggestedIgnoreAdoptCandidates.count) 個不推薦項",
-                                        "Ignore \(store.suggestedIgnoreAdoptCandidates.count) Suggested"
-                                    ),
-                                    systemImage: "eye.slash.fill"
-                                )
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.indigo)
-                            .controlSize(.mini)
-                            .help(tr("自动忽略已识别出的 App Store 渠道、国内内置更新更快及疑似同名撞库的应用", "自動忽略已識別出的 App Store 管道、國內內建更新更快及疑似同名撞庫的應用", "Automatically ignore App Store apps, faster self-updating apps, and version collisions"))
+                        if cautionOrIgnoreCount > 0 {
+                            BadgeView(
+                                text: tr("建议忽略 \(cautionOrIgnoreCount) 款", "建議忽略 \(cautionOrIgnoreCount) 款", "\(cautionOrIgnoreCount) Suggest Ignore"),
+                                color: .indigo
+                            )
                         }
                     }
 
                     Text(
                         tr(
-                            "• 开源与国际通用工具（如 Chrome / IINA / Clash / MacZip）推荐直接点击「接管并升级」或「Adopt」。\n• 对 App Store 渠道、需保留特定生产版本/老插件兼容（如 Blender / Eagle）、国内内建热更新更快（如网易云音乐）或版本号悬殊撞库的应用，系统已为您自动标记提示，建议点击「忽略」或「仅认领」。",
-                            "• 開源與國際通用工具（如 Chrome / IINA / Clash / MacZip）推薦直接點擊「接管並升級」或「Adopt」。\n• 對 App Store 管道、需保留特定生產版本/老外掛相容（如 Blender / Eagle）、國內內建熱更新更快（如網易雲音樂）或版本號懸殊撞庫的應用，系統已為您自動標記提示，建議點擊「忽略」或「僅認領」。",
-                            "• Open-source & global utilities (Chrome, IINA, Clash, MacZip) are great for \"Adopt & Upgrade\".\n• For App Store apps, version-locked pro/plugin apps (Blender, Eagle), faster self-updating domestic apps, or version collisions, check the smart badges and click \"Ignore\" or \"Adopt Only\"."
+                            "已自动识别商店应用与内置更新软件。推荐对开源/通用工具点击「升级并纳入」，对其余标蓝项点击「忽略」。",
+                            "已自動識別商店應用與內建更新軟體。推薦對開源/通用工具點擊「升級並納入」，對其餘標藍項點擊「忽略」。",
+                            "App Store and self-updating apps are automatically flagged. Click \"Adopt & Upgrade\" for standard tools or \"Ignore\" for flagged apps."
                         )
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Toggle(
-                        tr(
-                            "显示已忽略 (\(store.ignoredAdoptCandidatesList.count))",
-                            "顯示已忽略 (\(store.ignoredAdoptCandidatesList.count))",
-                            "Show Ignored (\(store.ignoredAdoptCandidatesList.count))"
-                        ),
-                        isOn: $store.showIgnoredAdoptCandidates
-                    )
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .font(.caption)
+                    .lineLimit(1)
                 }
             }
+
+            Spacer()
+
+            if !store.suggestedIgnoreAdoptCandidates.isEmpty {
+                Button {
+                    store.ignoreAllSuggestedAdoptCandidates()
+                } label: {
+                    Label(
+                        tr(
+                            "一键忽略 \(store.suggestedIgnoreAdoptCandidates.count) 个不推荐项",
+                            "一鍵忽略 \(store.suggestedIgnoreAdoptCandidates.count) 個不推薦項",
+                            "Ignore \(store.suggestedIgnoreAdoptCandidates.count) Flagged"
+                        ),
+                        systemImage: "eye.slash.fill"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .controlSize(.small)
+            }
+
+            Button {
+                store.showAdoptGuideSheet = true
+            } label: {
+                Label(tr("接管说明", "接管說明", "Guide"), systemImage: "questionmark.circle")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Toggle(
+                tr(
+                    "显示已忽略 (\(store.ignoredAdoptCandidatesList.count))",
+                    "顯示已忽略 (\(store.ignoredAdoptCandidatesList.count))",
+                    "Ignored (\(store.ignoredAdoptCandidatesList.count))"
+                ),
+                isOn: $store.showIgnoredAdoptCandidates
+            )
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .font(.caption)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.teal.opacity(0.08))
+        .padding(.vertical, 10)
+        .background(Color.teal.opacity(0.07))
         .sheet(isPresented: $store.showAdoptGuideSheet) {
             AdoptDecisionGuideSheet(store: store)
         }
@@ -306,16 +565,16 @@ public struct SearchView: View {
 
         if store.filteredAdoptCandidatesList.isEmpty {
             VStack(spacing: 12) {
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: 40))
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 42))
                     .foregroundStyle(.teal)
-                Text(tr("当前没有待处理的本机可接管应用", "目前沒有待處理的本機可接管應用程式", "No unmanaged local applications pending adoption"))
+                Text(tr("本机应用均已处理完毕", "本機應用程式均已處理完畢", "All local applications have been reviewed"))
                     .font(.headline)
                 if !store.ignoredAdoptCandidatesList.isEmpty && !store.showIgnoredAdoptCandidates {
                     Button(
                         tr(
-                            "查看已忽略的 \(store.ignoredAdoptCandidatesList.count) 个应用",
-                            "查看已忽略的 \(store.ignoredAdoptCandidatesList.count) 個應用程式",
+                            "查看已忽略的 \(store.ignoredAdoptCandidatesList.count) 款应用",
+                            "查看已忽略的 \(store.ignoredAdoptCandidatesList.count) 款應用程式",
                             "Show \(store.ignoredAdoptCandidatesList.count) ignored apps"
                         )
                     ) {
@@ -330,6 +589,8 @@ public struct SearchView: View {
             List(store.filteredAdoptCandidatesList) { candidate in
                 AdoptCandidateRow(
                     candidate: candidate,
+                    isRunningTask: store.isPackageCurrentlyRunning(candidate.caskToken),
+                    isQueuedTask: store.isPackageQueued(candidate.caskToken),
                     onAdoptOnly: {
                         store.adoptCask(
                             token: candidate.caskToken,
@@ -350,10 +611,151 @@ public struct SearchView: View {
                         store.toggleIgnoreAdoptCandidate(caskToken: candidate.caskToken)
                     }
                 )
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
             }
             .listStyle(.inset)
         }
+    }
+}
+
+private struct FeaturedDiscoveryCard: View {
+    let entry: CatalogEntry
+    let installedPkg: BrewPackage?
+    let adoptableApp: String?
+    let isLocalOlderThanCask: Bool
+    let isRunningTask: Bool
+    let isQueuedTask: Bool
+    let downloadProgress: Double?
+    let onInstall: () -> Void
+    let onAdopt: (Bool) -> Void
+    let onOpenInstalledApp: (String) -> Void
+    let onInspectDetail: () -> Void
+
+    private var resolvedAppPath: String? {
+        if let p = installedPkg?.resolvedAppPath {
+            return p
+        }
+        return AppIconProvider.shared.resolveExistingAppPath(for: entry.appBundles)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                onInspectDetail()
+            } label: {
+                PackageIconView(
+                    token: entry.name,
+                    type: entry.type,
+                    desc: entry.desc,
+                    appPath: resolvedAppPath,
+                    size: 40
+                )
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Button {
+                        onInspectDetail()
+                    } label: {
+                        Text(entry.displayName)
+                            .font(.system(.callout, design: .default).weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+
+                    if AppLanguage.current.resolved != .en,
+                       let zhBadge = ChineseSearchIndex.displayBadge(for: entry),
+                       zhBadge.lowercased() != entry.displayLower {
+                        BadgeView(text: zhBadge, color: .orange)
+                    }
+                }
+
+                let localizedDesc = ChineseSearchIndex.localizedDescription(for: entry)
+                Text(localizedDesc.isEmpty ? entry.desc : localizedDesc)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(entry.type.localizedHumanLabel)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
+
+                    if let installedPkg {
+                        Text("· \(tr("已安装", "已安裝", "Installed")) \(installedPkg.installedVersion ?? "")")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.green)
+                    } else if !entry.version.isEmpty {
+                        Text("· v\(entry.version)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if isRunningTask {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    if let frac = downloadProgress {
+                        Text("\(Int(frac * 100))%")
+                            .font(.caption2.monospaced().weight(.semibold))
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.accentColor.opacity(0.1))
+                .clipShape(Capsule())
+            } else if isQueuedTask {
+                Text(tr("排队中", "排隊中", "Queued"))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else if installedPkg != nil {
+                if let appPath = resolvedAppPath {
+                    Button {
+                        onOpenInstalledApp(appPath)
+                    } label: {
+                        Text(tr("打开", "打開", "Open"))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else {
+                    BadgeView(text: tr("已安装", "已安裝", "Installed"), color: .green)
+                }
+            } else if adoptableApp != nil {
+                Button {
+                    onAdopt(isLocalOlderThanCask)
+                } label: {
+                    Text(isLocalOlderThanCask ? tr("升级纳入", "升級納入", "Adopt") : tr("纳入", "納入", "Adopt"))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .controlSize(.small)
+            } else {
+                Button {
+                    onInstall()
+                } label: {
+                    Text(tr("获取", "取得", "Get"))
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
@@ -362,25 +764,51 @@ private struct SearchCatalogRow: View {
     let installedPkg: BrewPackage?
     let adoptableApp: String?
     let isLocalOlderThanCask: Bool
+    let isRunningTask: Bool
+    let isQueuedTask: Bool
+    let downloadProgress: Double?
     let onInstall: () -> Void
     let onAdopt: (Bool) -> Void
     let onIgnoreAdopt: () -> Void
     let onSearchReplacement: (String) -> Void
+    let onOpenInstalledApp: (String) -> Void
+    let onInspectDetail: () -> Void
+
+    private var resolvedAppPath: String? {
+        if let p = installedPkg?.resolvedAppPath {
+            return p
+        }
+        return AppIconProvider.shared.resolveExistingAppPath(for: entry.appBundles)
+    }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(entry.displayName)
-                        .font(.system(.body, design: .default).weight(.semibold))
-                        .strikethrough(entry.isDisabled && installedPkg == nil)
-                        .foregroundStyle(entry.isDisabled && installedPkg == nil ? .secondary : .primary)
+        HStack(alignment: .center, spacing: 14) {
+            // 1. Visual Icon Anchor
+            Button {
+                onInspectDetail()
+            } label: {
+                PackageIconView(
+                    token: entry.name,
+                    type: entry.type,
+                    desc: entry.desc,
+                    appPath: resolvedAppPath,
+                    size: 38
+                )
+            }
+            .buttonStyle(.plain)
 
-                    if entry.displayName != entry.name {
-                        Text("(\(entry.name))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            // 2. Concise Title + Localized Description + Clean Metadata Line
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Button {
+                        onInspectDetail()
+                    } label: {
+                        Text(entry.displayName)
+                            .font(.system(.body, design: .default).weight(.semibold))
+                            .strikethrough(entry.isDisabled && installedPkg == nil)
+                            .foregroundStyle(entry.isDisabled && installedPkg == nil ? .secondary : .primary)
                     }
+                    .buttonStyle(.plain)
 
                     if AppLanguage.current.resolved != .en,
                        let zhBadge = ChineseSearchIndex.displayBadge(for: entry),
@@ -388,25 +816,14 @@ private struct SearchCatalogRow: View {
                         BadgeView(text: zhBadge, color: .orange)
                     }
 
-                    BadgeView(
-                        text: entry.type.rawValue,
-                        color: entry.type == .cask ? .purple : .blue
-                    )
-
                     if let tap = entry.tap, !tap.isEmpty {
-                        BadgeView(text: "Tap: \(tap)", color: .indigo)
+                        BadgeView(text: tr("第三方源", "第三方源", "3rd-Party"), color: .indigo)
                     }
 
                     if entry.isDisabled {
-                        BadgeView(
-                            text: tr("已禁用", "已停用", "Disabled"),
-                            color: .red
-                        )
+                        BadgeView(text: tr("已停止分发", "已停止分發", "Discontinued"), color: .red)
                     } else if entry.isDeprecated {
-                        BadgeView(
-                            text: tr("已弃用", "已棄用", "Deprecated"),
-                            color: .orange
-                        )
+                        BadgeView(text: tr("即将停更", "即將停更", "Deprecated"), color: .orange)
                     }
 
                     if let installedPkg {
@@ -414,9 +831,9 @@ private struct SearchCatalogRow: View {
                             text: "\(tr("已安装", "已安裝", "Installed")) \(installedPkg.installedVersion ?? "")",
                             color: .green
                         )
-                    } else if let adoptableApp {
+                    } else if adoptableApp != nil {
                         BadgeView(
-                            text: "\(tr("本地已存在", "本機已存在", "Found locally:")) \(adoptableApp)",
+                            text: tr("本机已有此应用", "本機已有此應用", "On This Mac"),
                             color: .teal
                         )
                     }
@@ -427,58 +844,35 @@ private struct SearchCatalogRow: View {
                     Text(localizedDesc)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
 
                 if entry.isDisabled {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption2)
-                        let datePart = entry.disableDate.map { " (\($0))" } ?? ""
-                        let reasonPart = entry.localizedLifecycleReason ?? tr("已被官方标记为不可用", "已被官方標記為不可用", "Disabled by Homebrew")
-                        let replPart = entry.replacementPackage.map { " · \(tr("推荐替代包", "推薦替代套件", "Replacement")): \($0)" } ?? ""
-                        Text("\(tr("Homebrew 已禁用此包安装", "Homebrew 已停用此套件安裝", "Disabled in Homebrew"))\(datePart)：\(reasonPart)\(replPart)")
-                            .font(.caption)
+                        let reasonPart = entry.localizedLifecycleReason ?? tr("官方源已停止分发", "官方源已停止分發", "Disabled upstream")
+                        let replPart = entry.replacementPackage.map { " · \(tr("推荐替代", "推薦替代", "Try")): \($0)" } ?? ""
+                        Text("\(reasonPart)\(replPart)")
+                            .font(.caption2)
                     }
                     .foregroundStyle(.red)
-                } else if entry.isDeprecated {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock.badge.exclamationmark")
+                } else {
+                    HStack(spacing: 10) {
+                        Text(entry.type.localizedHumanLabel)
                             .font(.caption2)
-                        let reasonPart = entry.localizedLifecycleReason ?? tr("即将停止维护", "即將停止維護", "Deprecated upstream")
-                        let replPart = entry.replacementPackage.map { " · \(tr("推荐替代包", "推薦替代套件", "Replacement")): \($0)" } ?? ""
-                        if let futureDisable = entry.disableDate, !futureDisable.isEmpty {
-                            Text("\(tr("将于 \(futureDisable) 禁用", "將於 \(futureDisable) 停用", "Will be disabled on \(futureDisable)"))：\(reasonPart)\(replPart)")
-                                .font(.caption)
-                        } else {
-                            let depDatePart = entry.deprecateDate.map { " (\($0))" } ?? ""
-                            Text("\(tr("已标记弃用", "已標記棄用", "Deprecated"))\(depDatePart)：\(reasonPart)\(replPart)")
-                                .font(.caption)
+                            .foregroundStyle(.tertiary)
+
+                        if !entry.version.isEmpty {
+                            Text("v\(entry.version)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
                         }
-                    }
-                    .foregroundStyle(.orange)
-                }
 
-                HStack(spacing: 12) {
-                    if !entry.version.isEmpty {
-                        Text("\(tr("最新版本", "最新版本", "Latest")): \(entry.version)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if !entry.appBundles.isEmpty {
-                        Text("\(tr("应用包", "應用程式套件", "App Bundle")): \(entry.appBundles.joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let url = URL(string: entry.homepage), !entry.homepage.isEmpty {
-                        Link(destination: url) {
-                            HStack(spacing: 2) {
-                                Text(tr("主页", "首頁", "Homepage"))
-                                Image(systemName: "arrow.up.right.square")
-                            }
-                            .font(.caption)
+                        if entry.displayName.lowercased() != entry.nameLower {
+                            Text(entry.name)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -486,105 +880,132 @@ private struct SearchCatalogRow: View {
 
             Spacer()
 
-            // Action Buttons
+            // 3. Contextual Action Area (with live inline task status)
             HStack(spacing: 8) {
-                if installedPkg != nil {
-                    Label(tr("已安装", "已安裝", "Installed"), systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 8)
+                if isRunningTask {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        if let frac = downloadProgress {
+                            Text("\(Int(frac * 100))%")
+                                .font(.caption.monospaced().weight(.semibold))
+                                .foregroundStyle(.blue)
+                        } else {
+                            Text(tr("处理中…", "處理中…", "Working…"))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.1))
+                    .clipShape(Capsule())
+                } else if isQueuedTask {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text(tr("排队中", "排隊中", "Queued"))
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                } else if installedPkg != nil {
+                    if let appPath = resolvedAppPath {
+                        Button {
+                            onOpenInstalledApp(appPath)
+                        } label: {
+                            Label(tr("打开", "打開", "Open"), systemImage: "play.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    } else {
+                        Label(tr("已安装", "已安裝", "Installed"), systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 6)
+                    }
                 } else if adoptableApp != nil {
                     if isLocalOlderThanCask {
                         Button {
                             onAdopt(true)
                         } label: {
-                            Label(tr("接管并升级", "接管並升級", "Adopt & Upgrade"), systemImage: "arrow.up.circle.fill")
+                            Label(tr("升级并纳入", "升級並納入", "Upgrade & Manage"), systemImage: "arrow.up.circle.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
                         .controlSize(.small)
-                        .help(tr("本地版本较旧：将自动退出旧应用并执行 brew install --cask --force \(entry.name) 覆盖升级", "本機版本較舊：將自動結束舊應用並執行 brew install --cask --force \(entry.name) 覆蓋升級", "Local app is older: quits running app and runs brew install --cask --force \(entry.name)"))
-
-                        Button {
-                            onAdopt(false)
-                        } label: {
-                            Text(tr("仅认领", "僅認領", "Adopt Only"))
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help(tr("执行 --adopt 仅登记接管关系但不覆盖本地旧版文件", "執行 --adopt 僅登記接管關係但不覆蓋本機舊版檔案", "Runs --adopt without overwriting local files"))
                     } else {
                         Button {
                             onAdopt(false)
                         } label: {
-                            Label(tr("Adopt (接管)", "Adopt (接管)", "Adopt"), systemImage: "arrow.triangle.merge")
+                            Label(tr("纳入管理", "納入管理", "Manage"), systemImage: "arrow.triangle.merge")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.teal)
                         .controlSize(.small)
-                        .help(tr("执行 brew install --cask --adopt \(entry.name) 接管本地已有应用", "執行 brew install --cask --adopt \(entry.name) 接管本機已有應用程式", "Run brew install --cask --adopt \(entry.name)"))
+                    }
 
-                        Button {
-                            onInstall()
-                        } label: {
-                            Text(tr("覆盖重装", "覆蓋重裝", "Force Reinstall"))
+                    Menu {
+                        if isLocalOlderThanCask {
+                            Button {
+                                onAdopt(false)
+                            } label: {
+                                Label(tr("仅登记管理（保留当前旧版本）", "僅登記管理（保留目前舊版本）", "Manage Without Updating"), systemImage: "checkmark.circle")
+                            }
+                        } else {
+                            Button {
+                                onInstall()
+                            } label: {
+                                Label(tr("重新下载并覆盖安装", "重新下載並覆蓋安裝", "Force Reinstall"), systemImage: "arrow.clockwise")
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help(tr("执行 brew install --cask --force \(entry.name) 覆盖安装", "執行 brew install --cask --force \(entry.name) 覆蓋安裝", "Run brew install --cask --force \(entry.name)"))
-                    }
-
-                    Button {
-                        onIgnoreAdopt()
+                        Button {
+                            onIgnoreAdopt()
+                        } label: {
+                            Label(tr("忽略此本机应用", "忽略此本機應用", "Ignore This App"), systemImage: "eye.slash")
+                        }
+                        Divider()
+                        Button {
+                            onInspectDetail()
+                        } label: {
+                            Label(tr("查看软件详情", "檢視軟體詳情", "Package Details"), systemImage: "info.circle")
+                        }
                     } label: {
-                        Text(tr("忽略接管", "忽略接管", "Ignore"))
+                        Image(systemName: "ellipsis.circle")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help(tr("不再提示接管此应用", "不再提示接管此應用程式", "Do not suggest adopting this app"))
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 } else if entry.isDisabled {
                     if let repl = entry.replacementPackage, !repl.isEmpty {
                         Button {
                             onSearchReplacement(repl)
                         } label: {
-                            Label("\(tr("搜替代包", "搜尋替代套件", "Replacement")): \(repl)", systemImage: "arrow.right.circle.fill")
+                            Label("\(tr("看替代品", "看替代品", "Try")): \(repl)", systemImage: "arrow.right.circle.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.teal)
                         .controlSize(.small)
-                        .help(tr("搜索并查看官方推荐替代包 \(repl)", "搜尋並檢視官方推薦替代套件 \(repl)", "Search for recommended replacement package \(repl)"))
                     }
 
                     let fallbackURLString = !entry.homepage.isEmpty ? entry.homepage : (entry.downloadURL ?? "")
                     if let url = URL(string: fallbackURLString), !fallbackURLString.isEmpty {
                         Link(destination: url) {
-                            Label(tr("前往官网下载", "前往官網下載", "Get from Website"), systemImage: "arrow.up.right.square")
+                            Label(tr("前往官网", "前往官網", "Website"), systemImage: "safari")
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help(
-                            tr(
-                                "Homebrew 已禁用该包的命令安装（\(entry.localizedLifecycleReason ?? "")）。请前往官网或 GitHub Releases 手动下载安装（首次打开若遇拦截可在「系统设置 → 隐私与安全性」点击仍要打开）。",
-                                "Homebrew 已停用該套件的命令安裝（\(entry.localizedLifecycleReason ?? "")）。請前往官網或 GitHub Releases 手動下載安裝（首次開啟若遇攔截可在「系統設定 → 隱私權與安全性」點擊仍要打開）。",
-                                "Disabled in Homebrew (\(entry.localizedLifecycleReason ?? "")). Please download directly from the official website or GitHub Releases."
-                            )
-                        )
-                    } else {
-                        Label(tr("已禁用", "已停用", "Disabled"), systemImage: "nosign")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .padding(.horizontal, 8)
                     }
                 } else {
                     if let repl = entry.replacementPackage, !repl.isEmpty, entry.isDeprecated {
                         Button {
                             onSearchReplacement(repl)
                         } label: {
-                            Text("\(tr("替代包", "替代套件", "Try")): \(repl)")
+                            Text("\(tr("替代", "替代", "Try")): \(repl)")
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help(tr("查看推荐替代包 \(repl)", "檢視推薦替代套件 \(repl)", "Search replacement package \(repl)"))
                     }
 
                     Button {
@@ -595,6 +1016,15 @@ private struct SearchCatalogRow: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 }
+
+                Button {
+                    onInspectDetail()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(tr("查看软件详情、配置提示与依赖", "檢視軟體詳情、設定提示與依賴", "Inspect details, caveats & dependencies"))
             }
         }
     }
@@ -602,6 +1032,8 @@ private struct SearchCatalogRow: View {
 
 private struct AdoptCandidateRow: View {
     let candidate: AdoptCandidate
+    let isRunningTask: Bool
+    let isQueuedTask: Bool
     let onAdoptOnly: () -> Void
     let onAdoptAndUpgrade: () -> Void
     let onToggleIgnore: () -> Void
@@ -625,31 +1057,27 @@ private struct AdoptCandidateRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: candidate.appPath))
-                .resizable()
-                .frame(width: 36, height: 36)
-                .opacity(candidate.isIgnored ? 0.5 : 1.0)
+            PackageIconView(
+                token: candidate.caskToken,
+                type: .cask,
+                desc: candidate.desc,
+                appPath: FileManager.default.fileExists(atPath: candidate.appPath) ? candidate.appPath : nil,
+                size: 38
+            )
+            .opacity(candidate.isIgnored ? 0.5 : 1.0)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(candidate.appName)
+                HStack(spacing: 8) {
+                    Text(candidate.caskDisplayName)
                         .font(.system(.body, design: .default).weight(.semibold))
                         .strikethrough(candidate.isIgnored)
 
-                    Image(systemName: "arrow.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    BadgeView(text: "cask: \(candidate.caskToken)", color: .teal)
-
-                    if candidate.isLocalOlderThanCask && !candidate.isSuspiciousVersionCollision {
-                        BadgeView(text: tr("本地版本较旧", "本機版本較舊", "Local Outdated"), color: .orange)
-                    } else if candidate.isLocalNewerThanCask {
-                        BadgeView(text: tr("本地版本更新", "本機版本更新", "Local Newer"), color: .indigo)
-                    }
-
                     if candidate.advisory != .safeToAdopt && candidate.advisory != .safeToAdoptAndUpgrade {
                         BadgeView(text: candidate.advisory.badgeText, color: advisoryColor)
+                    } else if candidate.isLocalOlderThanCask {
+                        BadgeView(text: tr("有新版本可升", "有新版本可升", "Update Available"), color: .orange)
+                    } else {
+                        BadgeView(text: tr("版本一致 · 可直接纳入", "版本一致 · 可直接納入", "Ready to Manage"), color: .teal)
                     }
 
                     if candidate.isIgnored {
@@ -657,83 +1085,92 @@ private struct AdoptCandidateRow: View {
                     }
                 }
 
-                if !candidate.desc.isEmpty {
-                    Text(candidate.desc)
+                let zhDesc = ChineseSearchIndex.meta(for: candidate.caskToken)?.zhDesc
+                let displayDesc = (AppLanguage.current.resolved != .en && zhDesc != nil) ? zhDesc! : candidate.desc
+                if !displayDesc.isEmpty {
+                    Text(displayDesc)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                HStack(spacing: 14) {
-                    Text("\(tr("本地版本", "本機版本", "Local")): \(candidate.localVersion ?? tr("未知 (可能为 iOS 版)", "未知 (可能為 iOS 版)", "Unknown (iOS wrapper)"))")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(candidate.isLocalOlderThanCask ? .orange : (candidate.isLocalNewerThanCask ? .indigo : .secondary))
+                // Visual Version Comparison Strip
+                HStack(spacing: 8) {
+                    Text("\(tr("本机版本", "本機版本", "On Mac")): \(candidate.localVersion ?? tr("未知", "未知", "Unknown"))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
 
-                    Text("\(tr("Brew Cask 版本", "Brew Cask 版本", "Cask")): \(candidate.caskVersion)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.teal)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(candidate.isLocalOlderThanCask ? .orange : .secondary)
 
-                    Text(candidate.appPath)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                    Text("\(tr("官方源版本", "官方源版本", "Latest")): \(candidate.caskVersion)")
+                        .font(.caption2.monospaced().weight(candidate.isLocalOlderThanCask ? .semibold : .regular))
+                        .foregroundStyle(candidate.isLocalOlderThanCask ? .orange : .teal)
                 }
             }
 
             Spacer()
 
             HStack(spacing: 8) {
-                if !candidate.isIgnored {
+                if isRunningTask {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(tr("正在处理…", "正在處理…", "Working…"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if isQueuedTask {
+                    Text(tr("排队中", "排隊中", "Queued"))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if !candidate.isIgnored {
                     if candidate.isLocalOlderThanCask {
                         if candidate.isSuggestedToIgnore || candidate.isProductionVersionSensitive {
                             Button {
                                 onAdoptAndUpgrade()
                             } label: {
-                                Label(tr("接管并升级", "接管並升級", "Adopt & Upgrade"), systemImage: "arrow.up.circle")
+                                Label(tr("升级并纳入", "升級並納入", "Upgrade & Manage"), systemImage: "arrow.up.circle")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help(tr("将退出运行中的旧应用并执行 brew install --cask --force \(candidate.caskToken) 覆盖为新版", "將結束執行中的舊應用並執行 brew install --cask --force \(candidate.caskToken) 覆蓋為新版", "Quits running app and runs brew install --cask --force \(candidate.caskToken)"))
                         } else {
                             Button {
                                 onAdoptAndUpgrade()
                             } label: {
-                                Label(tr("接管并升级", "接管並升級", "Adopt & Upgrade"), systemImage: "arrow.up.circle.fill")
+                                Label(tr("升级并纳入", "升級並納入", "Upgrade & Manage"), systemImage: "arrow.up.circle.fill")
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.orange)
                             .controlSize(.small)
-                            .help(tr("本地版本低于 Cask 版本：将自动退出运行中的旧应用并执行 brew install --cask --force \(candidate.caskToken) 覆盖为新版", "本機版本低於 Cask 版本：將自動結束執行中的舊應用並執行 brew install --cask --force \(candidate.caskToken) 覆蓋為新版", "Local app is older: quits running app and runs brew install --cask --force \(candidate.caskToken)"))
                         }
 
                         Button {
                             onAdoptOnly()
                         } label: {
-                            Text(tr("仅认领", "僅認領", "Adopt Only"))
+                            Text(tr("仅保留旧版纳入", "僅保留舊版納入", "Keep Version"))
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help(tr("执行 --adopt 仅登记给 Brew 但保留本地旧版文件不覆盖", "執行 --adopt 僅登記給 Brew 但保留本機舊版檔案不覆蓋", "Runs --adopt without overwriting local files"))
                     } else {
                         if candidate.isSuggestedToIgnore {
                             Button {
                                 onAdoptOnly()
                             } label: {
-                                Label(tr("Adopt (接管)", "Adopt (接管)", "Adopt"), systemImage: "arrow.triangle.merge")
+                                Label(tr("纳入管理", "納入管理", "Manage"), systemImage: "arrow.triangle.merge")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help(tr("执行 brew install --cask --adopt \(candidate.caskToken) 接管", "執行 brew install --cask --adopt \(candidate.caskToken) 接管", "Run brew install --cask --adopt \(candidate.caskToken)"))
                         } else {
                             Button {
                                 onAdoptOnly()
                             } label: {
-                                Label(tr("Adopt (接管)", "Adopt (接管)", "Adopt"), systemImage: "arrow.triangle.merge")
+                                Label(tr("纳入管理", "納入管理", "Manage"), systemImage: "arrow.triangle.merge")
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.teal)
                             .controlSize(.small)
-                            .help(tr("本地版本已是最新：执行 brew install --cask --adopt \(candidate.caskToken) 直接无损接管", "本機版本已是最新：執行 brew install --cask --adopt \(candidate.caskToken) 直接無損接管", "Local app is up to date: run brew install --cask --adopt \(candidate.caskToken)"))
                         }
                     }
                 }
@@ -747,19 +1184,17 @@ private struct AdoptCandidateRow: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.indigo)
                     .controlSize(.small)
-                    .help(candidate.advisory.badgeText)
                 } else {
                     Button {
                         onToggleIgnore()
                     } label: {
                         Label(
-                            candidate.isIgnored ? tr("恢复显示", "恢復顯示", "Unignore") : tr("忽略", "忽略", "Ignore"),
+                            candidate.isIgnored ? tr("恢复", "恢復", "Restore") : tr("忽略", "忽略", "Ignore"),
                             systemImage: candidate.isIgnored ? "eye" : "eye.slash"
                         )
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help(candidate.isIgnored ? tr("取消忽略该应用", "取消忽略該應用程式", "Restore this app to adoptable list") : tr("忽略该应用（如商店版或不需要 Brew 管理的软件）", "忽略該應用程式（如商店版或不需要 Brew 管理的軟體）", "Ignore this app"))
                 }
             }
         }

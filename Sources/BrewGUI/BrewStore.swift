@@ -31,6 +31,8 @@ public final class BrewStore: ObservableObject {
     }
     @Published public var localApplicationsSet: Set<String> = []
     @Published public private(set) var filteredCatalogEntries: [CatalogEntry] = []
+    @Published public private(set) var featuredEssentialEntries: [CatalogEntry] = []
+    @Published public private(set) var featuredDeveloperEntries: [CatalogEntry] = []
     @Published public private(set) var filteredAdoptCandidatesList: [AdoptCandidate] = []
 
     private var installedPackageMap: [String: BrewPackage] = [:]
@@ -83,6 +85,8 @@ public final class BrewStore: ObservableObject {
             recomputeSearchResults()
         }
     }
+    @Published public var showAllDefaultCatalogList: Bool = false
+    @Published public var isInstalledAdoptBannerDismissed: Bool = false
 
     // Batch Install state
     @Published public var batchInputText: String = ""
@@ -155,6 +159,23 @@ public final class BrewStore: ObservableObject {
     @Published public var isLoadingTaps: Bool = false
     @Published public var newTapInput: String = ""
     @Published public var isProcessingQueue: Bool = false
+
+    // v3.0 UX Feedback & Package Detail Inspector State
+    @Published public var latestOutcomeFeedback: TaskOutcomeFeedback?
+    @Published public var inspectedTarget: InspectedPackageTarget? {
+        didSet {
+            if let target = inspectedTarget {
+                loadInspectedPackageDetail(for: target)
+            } else {
+                inspectedDetailInfo = nil
+                isLoadingPackageDetail = false
+            }
+        }
+    }
+    @Published public var inspectedDetailInfo: PackageDetailInfo?
+    @Published public var isLoadingPackageDetail: Bool = false
+
+    private var currentTaskOutputSlice: String = ""
 
     private var packageSizesByFileName: [String: Int64] = [:]
     private var stopAllRequested: Bool = false
@@ -1157,9 +1178,11 @@ public final class BrewStore: ObservableObject {
                     }
                 }
 
-                // Read actual on-disk Info.plist version from /Applications/<App>.app to detect `--adopt` version mismatch or missing app bundle
+                // Read actual on-disk Info.plist version from /Applications/<App>.app to detect `--adopt` version mismatch, missing app bundle, or Gatekeeper quarantine
                 var actualBundleVer: String? = nil
                 var anyBundleFoundOnDisk = false
+                var firstResolvedPath: String? = nil
+                var anyHasQuarantine = false
                 for bundle in appBundles {
                     let sysPath = "/Applications/\(bundle)"
                     let userPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/\(bundle)").path
@@ -1168,6 +1191,12 @@ public final class BrewStore: ObservableObject {
                         : (FileManager.default.fileExists(atPath: userPath) ? userPath : nil)
                     if let appPath = resolvedPath {
                         anyBundleFoundOnDisk = true
+                        if firstResolvedPath == nil {
+                            firstResolvedPath = appPath
+                        }
+                        if !anyHasQuarantine && Self.hasQuarantineAttribute(atPath: appPath) {
+                            anyHasQuarantine = true
+                        }
                         if actualBundleVer == nil {
                             let plistPath = (appPath as NSString).appendingPathComponent("Contents/Info.plist")
                             if let dict = NSDictionary(contentsOfFile: plistPath) {
@@ -1196,7 +1225,9 @@ public final class BrewStore: ObservableObject {
                         downloadURL: c.url,
                         tap: caskTap,
                         autoUpdates: c.auto_updates ?? false,
-                        isAppBundleMissingOnDisk: isMissingOnDisk
+                        isAppBundleMissingOnDisk: isMissingOnDisk,
+                        resolvedAppPath: firstResolvedPath,
+                        hasQuarantine: anyHasQuarantine
                     )
                 )
             }
@@ -1369,12 +1400,37 @@ public final class BrewStore: ObservableObject {
         }
 
         guard !trimmed.isEmpty else {
-            if activeCategory != .all {
-                let curatedList = pool.filter { !$0.isDisabled && ChineseSearchIndex.curated[$0.nameLower] != nil }
-                let others = pool.filter { !$0.isDisabled && ChineseSearchIndex.curated[$0.nameLower] == nil }
-                self.filteredCatalogEntries = Array((curatedList + others).prefix(150))
-            } else {
-                self.filteredCatalogEntries = Array(pool.filter { !$0.isDisabled }.prefix(120))
+            let curatedList = pool.filter { !$0.isDisabled && ChineseSearchIndex.curated[$0.nameLower] != nil }
+            let others = pool.filter { !$0.isDisabled && ChineseSearchIndex.curated[$0.nameLower] == nil }
+            self.filteredCatalogEntries = Array((curatedList + others).prefix(180))
+
+            if activeCategory == .all {
+                let essentialOrder = [
+                    "raycast", "iina", "keka", "pixpin", "bob", "appcleaner",
+                    "obsidian", "stats", "rectangle", "localsend", "alt-tab", "maccy"
+                ]
+                let devAndAIOrder = [
+                    "orbstack", "iterm2", "visual-studio-code", "ollama-app", "cherry-studio", "chatgpt",
+                    "uv", "ripgrep", "lazygit", "ffmpeg", "yt-dlp", "gh"
+                ]
+                var byLower: [String: CatalogEntry] = [:]
+                for item in curatedList {
+                    if byLower[item.nameLower] == nil || item.type == .cask {
+                        byLower[item.nameLower] = item
+                    }
+                }
+                var essentials = essentialOrder.compactMap { byLower[$0] }
+                if essentials.count < 8 {
+                    let existing = Set(essentials.map(\.id))
+                    essentials.append(contentsOf: curatedList.filter { !existing.contains($0.id) }.prefix(8 - essentials.count))
+                }
+                var devs = devAndAIOrder.compactMap { byLower[$0] }
+                if devs.count < 8 {
+                    let existing = Set((essentials + devs).map(\.id))
+                    devs.append(contentsOf: curatedList.filter { !existing.contains($0.id) }.prefix(8 - devs.count))
+                }
+                self.featuredEssentialEntries = essentials
+                self.featuredDeveloperEntries = devs
             }
             return
         }
@@ -2141,6 +2197,15 @@ public final class BrewStore: ObservableObject {
                 ? tr("已移至废纸篓", "已移至垃圾桶", "Moved to Trash")
                 : tr("已彻底删除", "已徹底刪除", "Permanently deleted")
             appendLog("\n[\(stamp)] 🧹 \(modeLabel): \(cleanedCount) \(tr("项已卸载软件残留", "項已解除安裝軟體殘留", "uninstalled app leftovers")) (\(freedStr))\n")
+            if cleanedCount > 0 {
+                latestOutcomeFeedback = TaskOutcomeFeedback(
+                    isSuccess: true,
+                    title: tr("已清理 \(cleanedCount) 项软件残留，释放 \(freedStr)", "已清理 \(cleanedCount) 項軟體殘留，釋放 \(freedStr)", "Cleaned \(cleanedCount) leftover items (\(freedStr) freed)"),
+                    subtitle: moveToTrash
+                        ? tr("残留目录已安全移至系统废纸篓", "殘留目錄已安全移至系統垃圾桶", "Leftover folders safely moved to macOS Trash")
+                        : tr("残留目录已从磁盘彻底移除", "殘留目錄已從磁碟徹底移除", "Leftover folders permanently removed")
+                )
+            }
             await scanAppLeftovers()
         }
     }
@@ -2334,10 +2399,10 @@ public final class BrewStore: ObservableObject {
 
     // MARK: - Mutating Commands & Serial Queue
 
-    public func checkUpdates(expandDrawer: Bool = true) {
+    public func checkUpdates(expandDrawer: Bool = false) {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "BrewGUI.lastAutoUpdateTimestamp")
         enqueueTask(
-            title: tr("检查更新", "檢查更新", "Check for updates"),
+            title: tr("检查软件源更新", "檢查軟體源更新", "Check for updates"),
             arguments: ["update"],
             allowAutoUpdate: true,
             rebuildCatalogAfter: true,
@@ -2427,7 +2492,7 @@ public final class BrewStore: ObservableObject {
         args.append(pkg.name)
         enqueueTask(
             title: zap
-                ? tr("彻底卸载 \(pkg.displayName) (--zap)", "徹底解除安裝 \(pkg.displayName) (--zap)", "Zap uninstall \(pkg.displayName) (--zap)")
+                ? tr("彻底卸载 \(pkg.displayName)", "徹底解除安裝 \(pkg.displayName)", "Complete Uninstall \(pkg.displayName)")
                 : tr("卸载 \(pkg.displayName)", "解除安裝 \(pkg.displayName)", "Uninstall \(pkg.displayName)"),
             arguments: args,
             appBundlesToQuit: pkg.type == .cask ? pkg.appBundles : [],
@@ -2482,7 +2547,6 @@ public final class BrewStore: ObservableObject {
         }
         guard !targetPaths.isEmpty else { return }
 
-        isTerminalDrawerExpanded = true
         Task {
             let stamp = Self.dateTimeFormatter.string(from: Date())
             let quotedPaths = targetPaths.map { "\"\($0)\"" }.joined(separator: " ")
@@ -2523,6 +2587,13 @@ public final class BrewStore: ObservableObject {
                         "Removed macOS quarantine attribute (com.apple.quarantine) from \(pkg.displayName). You can now open the app normally.\n"
                     )
                 )
+                latestOutcomeFeedback = TaskOutcomeFeedback(
+                    isSuccess: true,
+                    title: tr("已解除 \(pkg.displayName) 的系统安全拦截", "已解除 \(pkg.displayName) 的系統安全攔截", "Removed quarantine from \(pkg.displayName)"),
+                    subtitle: tr("现在可以正常打开该应用，不会再提示“已损坏或无法验证开发者”", "現在可以正常打開該應用，不會再提示「已損毀或無法驗證開發者」", "You can now launch the app without Gatekeeper warnings"),
+                    primaryAction: .openApp(path: targetPaths[0], displayName: pkg.displayName)
+                )
+                await refreshInstalled()
             } else {
                 appendLog(
                     "[\(endStamp)] ✗ " + tr(
@@ -2530,6 +2601,12 @@ public final class BrewStore: ObservableObject {
                         "解除 \(pkg.displayName) 隔離屬性失敗 (退出碼 \(exitCode))。\n",
                         "Failed to remove quarantine attribute from \(pkg.displayName) (exit code \(exitCode)).\n"
                     )
+                )
+                latestOutcomeFeedback = TaskOutcomeFeedback(
+                    isSuccess: false,
+                    title: tr("未能解除 \(pkg.displayName) 的安全拦截", "未能解除 \(pkg.displayName) 的安全攔截", "Could not remove quarantine from \(pkg.displayName)"),
+                    subtitle: tr("需要管理员权限或「App 管理」权限才能修改应用属性", "需要管理員權限或「App 管理」權限才能修改應用屬性", "Administrator or App Management permission is required"),
+                    primaryAction: .openTerminalLog
                 )
             }
         }
@@ -2758,8 +2835,15 @@ public final class BrewStore: ObservableObject {
         quitReason: String = "完成升级与文件覆盖",
         allowAutoUpdate: Bool = false,
         rebuildCatalogAfter: Bool = false,
-        expandDrawer: Bool = true
+        expandDrawer: Bool = false
     ) {
+        // Prevent duplicate consecutive/pending tasks from accidental double-clicks
+        if let running = currentTask, running.status == .running, running.arguments == arguments {
+            return
+        }
+        if taskQueue.contains(where: { $0.arguments == arguments }) {
+            return
+        }
         let cmdString = "brew " + arguments.joined(separator: " ")
         let item = BrewTaskItem(
             title: title,
@@ -2769,6 +2853,7 @@ public final class BrewStore: ObservableObject {
             quitReason: quitReason
         )
         taskQueue.append(item)
+        latestOutcomeFeedback = nil
         if expandDrawer {
             isTerminalDrawerExpanded = true
         }
@@ -2792,6 +2877,9 @@ public final class BrewStore: ObservableObject {
         }
 
         var needsCatalogRebuild = rebuildCatalogAfter
+        let preCleanupBytes = totalCachedDownloadsBytes
+        var succeededTasks: [BrewTaskItem] = []
+        var failedRecords: [(task: BrewTaskItem, output: String, exitCode: Int32)] = []
 
         while !taskQueue.isEmpty {
             if stopAllRequested {
@@ -2804,6 +2892,7 @@ public final class BrewStore: ObservableObject {
             task.startedAt = Date()
             currentTask = task
             skipCurrentRequested = false
+            currentTaskOutputSlice = ""
 
             let timestamp = Self.dateTimeFormatter.string(from: Date())
             appendLog("\n[\(timestamp)] $ \(task.commandDescription)\n")
@@ -2824,6 +2913,7 @@ public final class BrewStore: ObservableObject {
                     allowAutoUpdate: isUpdateCommand || allowAutoUpdate
                 ) { [weak self] chunk in
                     Task { @MainActor in
+                        self?.currentTaskOutputSlice.append(chunk)
                         self?.appendLog(chunk)
                     }
                 }
@@ -2855,6 +2945,7 @@ public final class BrewStore: ObservableObject {
                         allowAutoUpdate: false
                     ) { [weak self] chunk in
                         Task { @MainActor in
+                            self?.currentTaskOutputSlice.append(chunk)
                             self?.appendLog(chunk)
                         }
                     }) ?? -1
@@ -2886,11 +2977,13 @@ public final class BrewStore: ObservableObject {
                 } else if exitCode == 0 {
                     task.status = .succeeded
                     currentTask = task
+                    succeededTasks.append(task)
                     lastFailedOrSkippedTasks.removeAll { $0.commandDescription == task.commandDescription }
                     appendLog("[\(endStamp)] ✓ \(tr("完成", "完成", "Completed")) (\(task.title))\n")
                 } else {
                     task.status = .failed
                     currentTask = task
+                    failedRecords.append((task, currentTaskOutputSlice, exitCode))
                     if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
                         lastFailedOrSkippedTasks.append(task)
                     }
@@ -2900,6 +2993,7 @@ public final class BrewStore: ObservableObject {
                 task.status = .failed
                 task.finishedAt = Date()
                 currentTask = task
+                failedRecords.append((task, error.localizedDescription, -1))
                 if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
                     lastFailedOrSkippedTasks.append(task)
                 }
@@ -2916,6 +3010,15 @@ public final class BrewStore: ObservableObject {
         await scanAppLeftovers()
         if needsCatalogRebuild {
             await refreshCatalog(forceRebuild: true)
+        }
+
+        // Build human-centric v3.0 outcome feedback banner
+        if !stopAllRequested {
+            self.latestOutcomeFeedback = buildQueueOutcomeFeedback(
+                succeeded: succeededTasks,
+                failed: failedRecords,
+                preCleanupBytes: preCleanupBytes
+            )
         }
     }
 
@@ -2971,6 +3074,255 @@ public final class BrewStore: ObservableObject {
     private func appendLog(_ text: String) {
         terminalLog.append(text)
         BrewCommandRunner.appendToDiskLog(text)
+    }
+
+    // MARK: - v3.0 UX Helpers (Quarantine Check, Row Progress, App Launch, Detail Inspector & Outcome Classifier)
+
+    nonisolated private static func hasQuarantineAttribute(atPath path: String) -> Bool {
+        getxattr(path, "com.apple.quarantine", nil, 0, 0, XATTR_NOFOLLOW) > 0
+    }
+
+    public func isPackageCurrentlyRunning(_ token: String) -> Bool {
+        guard isProcessingQueue, let current = currentTask, current.status == .running else { return false }
+        let lower = token.lowercased()
+        return current.arguments.contains { arg in
+            let clean = (arg.lowercased() as NSString).lastPathComponent
+            return clean == lower
+        }
+    }
+
+    public func isPackageQueued(_ token: String) -> Bool {
+        let lower = token.lowercased()
+        return taskQueue.contains { item in
+            item.arguments.contains { arg in
+                let clean = (arg.lowercased() as NSString).lastPathComponent
+                return clean == lower
+            }
+        }
+    }
+
+    public func openInstalledApp(at path: String) {
+        let url = URL(fileURLWithPath: path)
+        NSWorkspace.shared.open(url)
+    }
+
+    public func revealPathInFinder(_ path: String) {
+        let url = URL(fileURLWithPath: path)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    public func inspectPackage(_ pkg: BrewPackage) {
+        inspectedTarget = InspectedPackageTarget(from: pkg)
+    }
+
+    public func inspectCatalogEntry(_ entry: CatalogEntry) {
+        inspectedTarget = InspectedPackageTarget(from: entry, installedPkg: installedPackage(for: entry))
+    }
+
+    private func loadInspectedPackageDetail(for target: InspectedPackageTarget) {
+        isLoadingPackageDetail = true
+        inspectedDetailInfo = nil
+        let token = target.qualifiedName
+        let isCask = (target.type == .cask)
+
+        Task {
+            let args = isCask
+                ? ["info", "--json=v2", "--cask", token]
+                : ["info", "--json=v2", "--formula", token]
+            guard let (out, _, exitCode) = try? await BrewCommandRunner.shared.runCapture(arguments: args),
+                  exitCode == 0,
+                  let root = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else {
+                if self.inspectedTarget?.id == target.id {
+                    self.inspectedDetailInfo = PackageDetailInfo(token: target.name)
+                    self.isLoadingPackageDetail = false
+                }
+                return
+            }
+
+            var caveatsStr: String? = nil
+            var deps: [String] = []
+            var conflicts: [String] = []
+
+            if isCask {
+                if let casks = root["casks"] as? [[String: Any]], let first = casks.first {
+                    if let cav = first["caveats"] as? String, !cav.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        caveatsStr = cav.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    if let depDict = first["depends_on"] as? [String: Any] {
+                        if let fDeps = depDict["formula"] as? [String] {
+                            deps.append(contentsOf: fDeps)
+                        }
+                        if let cDeps = depDict["cask"] as? [String] {
+                            deps.append(contentsOf: cDeps)
+                        }
+                    }
+                    if let confDict = first["conflicts_with"] as? [String: Any],
+                       let cList = confDict["cask"] as? [String] {
+                        conflicts.append(contentsOf: cList)
+                    }
+                }
+            } else {
+                if let formulae = root["formulae"] as? [[String: Any]], let first = formulae.first {
+                    if let cav = first["caveats"] as? String, !cav.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        caveatsStr = cav.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    if let fDeps = first["dependencies"] as? [String] {
+                        deps.append(contentsOf: fDeps)
+                    }
+                    if let fConf = first["conflicts_with"] as? [String] {
+                        conflicts.append(contentsOf: fConf)
+                    }
+                }
+            }
+
+            if self.inspectedTarget?.id == target.id {
+                self.inspectedDetailInfo = PackageDetailInfo(
+                    token: target.name,
+                    caveats: caveatsStr,
+                    dependencies: deps,
+                    conflictsWith: conflicts
+                )
+                self.isLoadingPackageDetail = false
+            }
+        }
+    }
+
+    public func performOutcomeAction(_ action: TaskOutcomeAction) {
+        switch action {
+        case .openApp(let path, _):
+            openInstalledApp(at: path)
+        case .switchMirrorAndRetry:
+            if mirrorSource == .official || resolvedMirror == .official {
+                mirrorSource = .ustc
+            }
+            latestOutcomeFeedback = nil
+            retryFailedOrSkippedTasks()
+        case .retryTasks:
+            latestOutcomeFeedback = nil
+            retryFailedOrSkippedTasks()
+        case .openTerminalLog:
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isTerminalDrawerExpanded = true
+            }
+        case .openAppManagementSettings:
+            openSystemAppManagementSettings()
+        }
+    }
+
+    private func buildQueueOutcomeFeedback(
+        succeeded: [BrewTaskItem],
+        failed: [(task: BrewTaskItem, output: String, exitCode: Int32)],
+        preCleanupBytes: Int64
+    ) -> TaskOutcomeFeedback? {
+        if let firstFail = failed.first {
+            let (reasonText, suggestedAction) = Self.classifyFailureReason(output: firstFail.output, exitCode: firstFail.exitCode)
+            let failTitle: String
+            if failed.count == 1 && succeeded.isEmpty {
+                failTitle = tr("\(firstFail.task.title) 未能完成", "\(firstFail.task.title) 未能完成", "\(firstFail.task.title) did not complete")
+            } else {
+                failTitle = tr("已完成 \(succeeded.count) 项，\(failed.count) 项未成功", "已完成 \(succeeded.count) 項，\(failed.count) 項未成功", "\(succeeded.count) succeeded, \(failed.count) failed")
+            }
+            return TaskOutcomeFeedback(
+                isSuccess: false,
+                title: failTitle,
+                subtitle: reasonText,
+                primaryAction: suggestedAction,
+                secondaryAction: suggestedAction == .openTerminalLog ? nil : .openTerminalLog
+            )
+        }
+
+        guard !succeeded.isEmpty else { return nil }
+
+        if succeeded.count == 1, let single = succeeded.first {
+            let firstArg = single.arguments.first ?? ""
+            if firstArg == "update" {
+                let count = outdatedCount
+                return TaskOutcomeFeedback(
+                    isSuccess: true,
+                    title: tr("软件源索引已更新至最新", "軟體源索引已更新至最新", "Package catalog is up to date"),
+                    subtitle: count > 0
+                        ? tr("检测到 \(count) 款已安装软件有新版本可用", "偵測到 \(count) 款已安裝軟體有新版本可用", "\(count) installed packages have updates available")
+                        : tr("本机所有已管理软件均为最新版本", "本機所有已管理軟體均為最新版本", "All managed packages are up to date")
+                )
+            }
+            if firstArg == "cleanup" {
+                let freed = max(0, preCleanupBytes - totalCachedDownloadsBytes)
+                let freedStr = freed > 0 ? AppConstants.formatBytes(freed) : ""
+                return TaskOutcomeFeedback(
+                    isSuccess: true,
+                    title: freed > 0
+                        ? tr("缓存清理完成，已释放 \(freedStr) 磁盘空间", "快取清理完成，已釋放 \(freedStr) 磁碟空間", "Cache cleanup complete (\(freedStr) freed)")
+                        : tr("下载缓存与旧版本已清理完毕", "下載快取與舊版本已清理完畢", "Download caches and old versions cleaned"),
+                    subtitle: tr("所有历史安装包缓存均已安全移除", "所有歷史安裝包快取均已安全移除", "Historical installer archives have been safely removed")
+                )
+            }
+
+            // If this task installed or upgraded a Cask, find its .app path so user can launch it immediately
+            if (firstArg == "install" || firstArg == "upgrade" || firstArg == "reinstall"),
+               let lastArg = single.arguments.last,
+               !lastArg.hasPrefix("-") {
+                let cleanToken = (lastArg.lowercased() as NSString).lastPathComponent
+                if let pkg = installedPackages.first(where: { $0.name.lowercased() == cleanToken }) {
+                    if let appPath = pkg.resolvedAppPath {
+                        return TaskOutcomeFeedback(
+                            isSuccess: true,
+                            title: tr("已完成：\(single.title)", "已完成：\(single.title)", "Completed: \(single.title)"),
+                            subtitle: tr("当前版本 \(pkg.installedVersion ?? pkg.latestVersion) · 可直接启动应用", "目前版本 \(pkg.installedVersion ?? pkg.latestVersion) · 可直接啟動應用", "Version \(pkg.installedVersion ?? pkg.latestVersion) · Ready to launch"),
+                            primaryAction: .openApp(path: appPath, displayName: pkg.displayName)
+                        )
+                    }
+                    return TaskOutcomeFeedback(
+                        isSuccess: true,
+                        title: tr("已完成：\(single.title)", "已完成：\(single.title)", "Completed: \(single.title)"),
+                        subtitle: tr("当前版本 \(pkg.installedVersion ?? pkg.latestVersion)", "目前版本 \(pkg.installedVersion ?? pkg.latestVersion)", "Version \(pkg.installedVersion ?? pkg.latestVersion)")
+                    )
+                }
+            }
+
+            return TaskOutcomeFeedback(
+                isSuccess: true,
+                title: tr("已完成：\(single.title)", "已完成：\(single.title)", "Completed: \(single.title)"),
+                subtitle: tr("操作已顺利生效", "操作已順利生效", "Operation completed successfully")
+            )
+        }
+
+        return TaskOutcomeFeedback(
+            isSuccess: true,
+            title: tr("已顺利完成全部 \(succeeded.count) 项任务", "已順利完成全部 \(succeeded.count) 項任務", "Successfully completed all \(succeeded.count) tasks"),
+            subtitle: tr("软件列表与状态已自动刷新", "軟體列表與狀態已自動重新整理", "Package list and status have been refreshed")
+        )
+    }
+
+    private static func classifyFailureReason(output: String, exitCode: Int32) -> (String, TaskOutcomeAction) {
+        let lower = output.lowercased()
+        if lower.contains("curl:") || lower.contains("timed out") || lower.contains("could not resolve host") || lower.contains("ssl_error") || lower.contains("download failed") {
+            return (
+                tr("网络连接超时或安装包下载中断，建议切换至国内加速镜像后重试", "網路連線逾時或安裝包下載中斷，建議切換至國內加速鏡像後重試", "Network timeout or download interrupted. Try switching mirror and retrying."),
+                .switchMirrorAndRetry
+            )
+        }
+        if lower.contains("operation not permitted") || lower.contains("app management") {
+            return (
+                tr("macOS 拦截了对 /Applications 的修改，请开启「App 管理」权限后重试", "macOS 攔截了對 /Applications 的修改，請開啟「App 管理」權限後重試", "macOS blocked modifying /Applications. Please grant App Management permission."),
+                .openAppManagementSettings
+            )
+        }
+        if lower.contains("sudo:") || lower.contains("password") || lower.contains("authentication") {
+            return (
+                tr("管理员密码授权未通过或已取消，可点击重试并输入系统密码", "管理員密碼授權未通過或已取消，可點擊重試並輸入系統密碼", "Administrator authorization was cancelled or failed. Click Retry to try again."),
+                .retryTasks
+            )
+        }
+        if lower.contains("already an app at") {
+            return (
+                tr("应用程序目录中已存在同名软件，可使用「升级并接管」覆盖安装", "應用程式目錄中已存在同名軟體，可使用「升級並接管」覆蓋安裝", "An app with the same name already exists in /Applications."),
+                .openTerminalLog
+            )
+        }
+        return (
+            tr("执行过程遇到异常 (退出码 \(exitCode))，可点击重试或展开控制台查看详情", "執行過程遇到異常 (退出碼 \(exitCode))，可點擊重試或展開控制台檢視詳情", "Task exited with code \(exitCode). Click Retry or inspect the console log."),
+            .retryTasks
+        )
     }
 
     private static let timeFormatter: DateFormatter = {

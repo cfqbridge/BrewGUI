@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-APP_VERSION="${APP_VERSION:-2.3.261114}"
+APP_VERSION="${APP_VERSION:-3.1.261115}"
 
 echo "==> 1. Compiling BrewGUI v$APP_VERSION (Release, arm64)..."
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/tmp/clang-module-cache}"
@@ -99,6 +99,11 @@ cat > "$ENTITLEMENTS_PLIST" <<'EOF'
 EOF
 /usr/bin/codesign --force --deep --entitlements "$ENTITLEMENTS_PLIST" -s - "$APP_BUNDLE"
 touch "$APP_BUNDLE"
+
+if [[ "${SKIP_DMG:-0}" == "1" ]]; then
+    echo "==> Done! App bundle assembled for local testing: $APP_BUNDLE (SKIP_DMG=1)"
+    exit 0
+fi
 
 echo "==> 4. Packaging styled DMG installer..."
 DMG_BG_SOURCE="${2:-$PROJECT_DIR/ref/dmg_bg_option_c.png}"

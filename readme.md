@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.3.261114-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v3.1.261115-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -48,11 +48,12 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 - **本机应用接管图文避坑指南与 4 类风险识别**：自动扫描 `/Applications`，智能识别并标记 **App Store 渠道应用**、**生产力/老插件版本敏感应用**、**厂商内建更新更快的国内应用** 及 **同名撞库版本异常应用**，支持一键忽略全部不推荐项。
 - **版本比对与一键升级覆盖**：当本地应用版本落后于 Cask 最新版时，支持一键 `brew install --cask --force` 覆盖升级，彻底解决旧版残留与认领脱节问题。
 
-### 3. 📦 已安装包管理与真实版本校验
-- **多维度版本透视与贪婪更新 (`--greedy`)**：直观展示顶层安装包 (`leaves`)、全量依赖树、版本锁定状态 (`pin/unpin`)；内置 `含自更新 (--greedy)` 开关，支持一键检测并升级带 `auto_updates true` 或 `:latest` 的桌面软件（自动过滤已从 `/Applications` 删除的孤儿记录与本机已自更新到最新版的软件）。
-- **真实磁盘版本校验**：自动校验本地应用 `Info.plist` 真实版本与 Homebrew 账面记录，杜绝“账面已更新、磁盘仍是旧版本”。
-- **单应用一键解除隔离拦截**：已安装 Cask 行内置盾牌按钮（`xattr -dr com.apple.quarantine`），一键修复开源软件或第三方 Tap 应用双击报“已损坏 / 无法验证开发者”的 Gatekeeper 拦截弹窗。
-- **容错彻底卸载 (`--zap`)**：Cask 卸载支持普通卸载与 `--zap` 深度清理；当 `--zap` 遇到 macOS 完全磁盘访问权限受限路径（如 `sharedfilelist`）中断时，自动回退执行强制卸载清除 Caskroom 备份并安全清理其余用户目录残留，杜绝半卸载死锁。
+### 3. 📦 视觉化已安装包管理、按需透视与智能交互 (v3.0 全面进化)
+- **真实图标与低认知负担视觉语言**：本地已安装桌面应用直接展示 `/Applications` 原生高清图标，未安装及命令行工具采用场景语义着色圆角图标；全界面彻底去术语化（以「桌面应用 / 命令行工具 / 版本已锁定 / 含自更新软件 / 卸载并清理残留」取代生涩的 `Cask / Formula / Pinned / --greedy / --zap`）。
+- **按需软件包详情弹窗 (`PackageDetailSheetView`)**：点击任意软件右侧 `ⓘ` 按钮即可按需查看完整功能简介、体积与安装状态、依赖包列表 (`dependencies`) 以及 Homebrew 关键配置提示 (`caveats`，带一键复制命令)，平时保持列表极致清爽。
+- **情境化「解除拦截」与一键「打开」**：自动检测本地 `.app` 是否带有 macOS 隔离属性 (`com.apple.quarantine`)，**仅在确实存在拦截风险的软件行**自动浮现橙色「解除拦截」按钮；已安装桌面应用在搜索页、已安装页及操作结果横幅中均可一键「打开」。
+- **顺手的操作动线与空间比例条**：在「已安装」顶栏就近集成「备份与迁移」（导出/恢复标准 `Brewfile`）与「筛选选项」菜单，底部内联提示可升级的自更新软件数量；「清理与维护」顶部新增双色比例条直观对比「安装包缓存」与「卸载残留」可释放空间。
+- **容错彻底卸载 (`--zap`)**：卸载桌面应用支持仅移除主程序或连带清理配置缓存；当遇到 macOS 完全磁盘访问权限受限路径（如 `sharedfilelist`）中断时，自动回退执行强制卸载清除 Caskroom 备份并安全清理其余用户目录残留，杜绝半卸载死锁。
 
 ### 4. 🧹 四合一进阶清理与系统维护 (Cache / `:zap` Leftovers / Services / Doctor)
 - **缓存文件与孤儿依赖清理**：直观展示 `~/Library/Caches/Homebrew/downloads` 缓存占用明细、一键 `brew cleanup --prune=all` 与 `brew autoremove` 孤儿依赖清理。
@@ -66,9 +67,10 @@ Homebrew 是 macOS 上无可替代的包管理神器，但在日常使用中经�
 - **混合安装编排**：Formula 自动合并单条命令一次性解析公共依赖，Cask 逐个独立入队下载安装，互不阻塞，支持随时单包跳过。
 - **双模式导出本机环境（CLI 指令 & 标准 `Brewfile`）**：支持一键将当前机器所有顶层包导出为命令行脚本或保存为标准 `Brewfile` 文件，换机恢复一键搞定。
 
-### 6. 📊 实时下载监控与任务管控
-- **透明进度监控**：突破非 TTY 管道限制，实时监控底层下载流量增长，直观呈现文件名、下载百分比与实时网速（KB/s、MB/s）。
-- **任务灵活控制**：支持「停止全部」、「跳过当前包 (Skip)」以及失败单项「一键重试」。
+### 6. 📊 行内实时进度、结果反馈横幅与后台控制台 (v3.0)
+- **操作行内实时反馈**：点击安装、升级或卸载后，无需打开终端抽屉，直接在该软件行内显示旋转进度、实时下载百分比与网速（KB/s、MB/s），操作视线零跳转。
+- **目的导向的结果反馈横幅 (`TaskOutcomeFeedback`)**：后台控制台默认静默收起；任务完成时底部弹出清晰的结果横幅（如「✅ 已安装 Raycast，可直接启动」并提供一键「打开」按钮），若遇失败则自动诊断原因并提供「切至国内镜像并重试 / 开启权限 / 查看日志」直达按钮。
+- **任务灵活控制**：支持「停止全部」、「跳过当前包 (Skip)」以及失败单项「一键重试」，专业用户仍可随时展开「控制台日志」查看完整流式输出。
 
 ### 7. 🌐 多语言国际化与应用内免拦截自更新 (v1.6)
 - **三语实时热切换**：原生内置 **简体中文 (`zh-Hans`) / 繁體中文 (`zh-Hant`) / English (`en`)**，默认智能跟随 macOS 系统语言，支持在主窗口侧边栏底部或菜单栏面板一键切换、零延迟生效（无需重启应用）。

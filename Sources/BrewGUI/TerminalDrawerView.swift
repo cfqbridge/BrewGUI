@@ -9,80 +9,62 @@ public struct TerminalDrawerView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            // Outcome Feedback Banner (shown when a task or batch finishes)
+            if !store.isProcessingQueue, let feedback = store.latestOutcomeFeedback {
+                Divider()
+                outcomeFeedbackBanner(feedback)
+            }
+
             Divider()
 
-            // Status Header Bar (Always Visible)
+            // Compact Activity & Status Footer Bar
             HStack(spacing: 10) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        store.isTerminalDrawerExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: store.isTerminalDrawerExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption.weight(.bold))
-                        Image(systemName: "terminal")
-                            .font(.callout)
-                        Text(tr("终端输出与任务队列", "終端機輸出與任務佇列", "Terminal & Task Queue"))
-                            .font(.callout.weight(.medium))
-                    }
-                }
-                .buttonStyle(.plain)
+                if let current = store.currentTask, current.status == .running {
+                    ProgressView()
+                        .controlSize(.small)
 
-                if let current = store.currentTask {
-                    Divider()
-                        .frame(height: 14)
+                    Text(current.title)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
 
-                    HStack(spacing: 6) {
-                        switch current.status {
-                        case .running:
-                            ProgressView()
-                                .controlSize(.small)
-                        case .succeeded:
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        case .failed:
-                            Image(systemName: "xmark.octagon.fill")
-                                .foregroundStyle(.red)
-                        case .cancelled:
-                            Image(systemName: "stop.circle.fill")
-                                .foregroundStyle(.orange)
-                        case .skipped:
-                            Image(systemName: "forward.end.fill")
-                                .foregroundStyle(.orange)
-                        case .queued:
-                            Image(systemName: "clock")
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Text(current.title)
-                            .font(.caption.weight(.medium))
-                            .lineLimit(1)
-
-                        if let dl = store.activeDownloadInfo, current.status == .running {
-                            HStack(spacing: 6) {
-                                BadgeView(text: "⬇︎ \(dl.formattedSummary)", color: .blue)
-                                if let frac = dl.progressFraction {
-                                    ProgressView(value: frac)
-                                        .controlSize(.small)
-                                        .frame(width: 72)
-                                }
+                    if let dl = store.activeDownloadInfo {
+                        HStack(spacing: 8) {
+                            if let frac = dl.progressFraction {
+                                ProgressView(value: frac)
+                                    .controlSize(.small)
+                                    .frame(width: 84)
                             }
-                        } else {
-                            Text("(\(current.commandDescription))")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            BadgeView(text: "⬇︎ \(dl.formattedSummary)", color: .blue)
                         }
+                    } else {
+                        Text(tr("正在处理中…", "正在處理中…", "Processing…"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !store.taskQueue.isEmpty {
+                        BadgeView(
+                            text: tr("后续排队 \(store.taskQueue.count) 项", "後續排隊 \(store.taskQueue.count) 項", "\(store.taskQueue.count) queued"),
+                            color: .orange
+                        )
                     }
                 } else {
-                    Text(tr("空闲", "閒置", "Idle"))
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.green.opacity(0.75))
+                            .frame(width: 7, height: 7)
+                        Text(
+                            store.installedPackages.isEmpty
+                                ? tr("就绪", "就緒", "Ready")
+                                : tr(
+                                    "就绪 · 已纳管 \(store.installedPackages.filter(\.isTopLevel).count) 款软件",
+                                    "就緒 · 已納管 \(store.installedPackages.filter(\.isTopLevel).count) 款軟體",
+                                    "Ready · Managing \(store.installedPackages.filter(\.isTopLevel).count) packages"
+                                )
+                        )
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-
-                if !store.taskQueue.isEmpty {
-                    BadgeView(text: "\(tr("排队中", "排隊中", "Queued")): \(store.taskQueue.count)", color: .orange)
+                    }
                 }
 
                 Spacer()
@@ -93,13 +75,13 @@ public struct TerminalDrawerView: View {
                         Button {
                             store.skipCurrentTask()
                         } label: {
-                            Label(tr("跳过当前包", "略過目前套件", "Skip Current"), systemImage: "forward.end.fill")
+                            Label(tr("跳过当前项", "略過目前項", "Skip"), systemImage: "forward.end.fill")
                                 .font(.caption)
                         }
                         .buttonStyle(.bordered)
                         .tint(.orange)
                         .controlSize(.mini)
-                        .help(tr("终止当前卡住的包并立即开始队列中的下一个任务", "終止目前卡住的套件並立即開始佇列中的下一個任務", "Skip the current task and move to the next queued item"))
+                        .help(tr("跳过当前软件并继续队列中的下一项", "略過目前軟體並繼續佇列中的下一項", "Skip current item and continue with next"))
                     }
 
                     Button(role: .destructive) {
@@ -114,22 +96,20 @@ public struct TerminalDrawerView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
                     .controlSize(.mini)
-                    .help(tr("立即终止当前运行的 brew / curl 进程并清空等待队列", "立即終止目前執行的 brew / curl 程序並清空等待佇列", "Terminate running brew/curl processes and clear the queue"))
-                } else if !store.lastFailedOrSkippedTasks.isEmpty
-                            || (store.currentTask?.status == .failed || store.currentTask?.status == .cancelled || store.currentTask?.status == .skipped) {
+                } else if !store.lastFailedOrSkippedTasks.isEmpty && store.latestOutcomeFeedback == nil {
                     Button {
                         store.retryFailedOrSkippedTasks()
                     } label: {
                         let count = max(1, store.lastFailedOrSkippedTasks.count)
                         Label(
                             count > 1
-                                ? tr("重试未完成项 (\(count))", "重試未完成項 (\(count))", "Retry Incomplete (\(count))")
+                                ? tr("重试未完成项 (\(count))", "重試未完成項 (\(count))", "Retry (\(count))")
                                 : tr("重试", "重試", "Retry"),
                             systemImage: "arrow.clockwise"
                         )
                         .font(.caption)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .tint(.orange)
                     .controlSize(.mini)
                 }
@@ -138,7 +118,7 @@ public struct TerminalDrawerView: View {
                     Button {
                         store.clearTerminalLog()
                     } label: {
-                        Label(tr("清空日志", "清空日誌", "Clear Log"), systemImage: "trash")
+                        Label(tr("清空日志", "清空日誌", "Clear"), systemImage: "trash")
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
@@ -146,25 +126,36 @@ public struct TerminalDrawerView: View {
                 }
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
                         store.isTerminalDrawerExpanded.toggle()
                     }
                 } label: {
-                    Text(store.isTerminalDrawerExpanded ? tr("收起", "收起", "Collapse") : tr("展开", "展開", "Expand"))
+                    HStack(spacing: 4) {
+                        Image(systemName: "terminal")
+                            .font(.caption2)
+                        Text(
+                            store.isTerminalDrawerExpanded
+                                ? tr("收起控制台", "收起控制台", "Hide Console")
+                                : tr("控制台日志", "控制台日誌", "Console Log")
+                        )
                         .font(.caption)
+                        Image(systemName: store.isTerminalDrawerExpanded ? "chevron.down" : "chevron.up")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+                .help(tr("查看或隐藏底层命令详细输出与排队列表", "檢視或隱藏底層命令詳細輸出與排隊列表", "Toggle detailed background command output"))
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.vertical, 6)
             .background(Color(nsColor: .windowBackgroundColor))
 
-            // Expandable Terminal Output Area
+            // Secondary Expandable Console Output (Hidden by default)
             if store.isTerminalDrawerExpanded {
                 Divider()
 
-                // Queued Tasks Strip (allows removing individual queued items)
                 if !store.taskQueue.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -184,7 +175,7 @@ public struct TerminalDrawerView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                     .buttonStyle(.plain)
-                                    .help(tr("从等待队列中移除此任务", "從等待佇列中移除此任務", "Remove this task from queue"))
+                                    .help(tr("从队列中移除", "從佇列中移除", "Remove from queue"))
                                 }
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
@@ -206,13 +197,13 @@ public struct TerminalDrawerView: View {
                             Text(
                                 store.terminalLog.isEmpty
                                     ? tr(
-                                        "暂无命令执行输出。执行 update / upgrade / install / adopt / cleanup 时将在此实时流式展示终端输出。",
-                                        "暫無命令執行輸出。執行 update / upgrade / install / adopt / cleanup 時將在此即時展示終端機輸出。",
-                                        "No terminal output yet. Real-time streaming output from update / upgrade / install / adopt / cleanup will appear here."
+                                        "暂无后台命令输出。所有安装、更新与清理任务的详细日志均会记录在此。",
+                                        "暫無背景命令輸出。所有安裝、更新與清理任務的詳細日誌均會記錄在此。",
+                                        "No background command output yet. Detailed logs appear here."
                                     )
                                     : store.terminalLog
                             )
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 11.5, design: .monospaced))
                             .foregroundStyle(store.terminalLog.isEmpty ? .secondary : .primary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -224,7 +215,7 @@ public struct TerminalDrawerView: View {
                         }
                     }
                     .background(Color(nsColor: .textBackgroundColor))
-                    .frame(height: 200)
+                    .frame(height: 190)
                     .onChange(of: store.terminalLog) { _, _ in
                         withAnimation(.easeOut(duration: 0.1)) {
                             proxy.scrollTo("BOTTOM_ANCHOR", anchor: .bottom)
@@ -232,6 +223,83 @@ public struct TerminalDrawerView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func outcomeFeedbackBanner(_ feedback: TaskOutcomeFeedback) -> some View {
+        let accentColor: Color = feedback.isSuccess ? .green : .orange
+        HStack(spacing: 12) {
+            Image(systemName: feedback.isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundStyle(accentColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feedback.title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                if let sub = feedback.subtitle, !sub.isEmpty {
+                    Text(sub)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if let primary = feedback.primaryAction {
+                Button {
+                    store.performOutcomeAction(primary)
+                } label: {
+                    outcomeActionLabel(primary)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(feedback.isSuccess ? .accentColor : .orange)
+                .controlSize(.small)
+            }
+
+            if let secondary = feedback.secondaryAction {
+                Button {
+                    store.performOutcomeAction(secondary)
+                } label: {
+                    outcomeActionLabel(secondary)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    store.latestOutcomeFeedback = nil
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(4)
+            }
+            .buttonStyle(.plain)
+            .help(tr("关闭提示", "關閉提示", "Dismiss"))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(accentColor.opacity(0.11))
+    }
+
+    @ViewBuilder
+    private func outcomeActionLabel(_ action: TaskOutcomeAction) -> some View {
+        switch action {
+        case .openApp(_, let name):
+            Label(tr("打开 \(name)", "打開 \(name)", "Open \(name)"), systemImage: "play.fill")
+        case .switchMirrorAndRetry:
+            Label(tr("切至国内镜像并重试", "切至國內鏡像並重試", "Switch Mirror & Retry"), systemImage: "bolt.horizontal.fill")
+        case .retryTasks:
+            Label(tr("立即重试", "立即重試", "Retry Now"), systemImage: "arrow.clockwise")
+        case .openTerminalLog:
+            Label(tr("查看日志", "檢視日誌", "View Log"), systemImage: "terminal")
+        case .openAppManagementSettings:
+            Label(tr("开启权限", "開啟權限", "Grant Permission"), systemImage: "lock.open.fill")
         }
     }
 }

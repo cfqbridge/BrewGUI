@@ -6,7 +6,7 @@ public enum AppConstants {
         if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
             return shortVer
         }
-        return "2.3.261114"
+        return "3.1.261115"
     }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
@@ -168,6 +168,15 @@ public enum HomebrewInstallState: Equatable, Sendable {
 public enum PackageType: String, Codable, CaseIterable, Sendable {
     case formula = "Formula"
     case cask = "Cask"
+
+    public var localizedHumanLabel: String {
+        switch self {
+        case .formula:
+            return tr("命令行工具", "命令列工具", "CLI Tool")
+        case .cask:
+            return tr("桌面应用", "桌面應用", "Desktop App")
+        }
+    }
 }
 
 public struct BrewPackage: Identifiable, Hashable, Sendable {
@@ -188,6 +197,8 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
     public let tap: String?          // e.g. "chen08209/tap" for third-party Tap packages
     public let autoUpdates: Bool     // true when Cask declares `auto_updates true`
     public let isAppBundleMissingOnDisk: Bool // true when Cask declares `.app` bundles but none exist on disk
+    public let resolvedAppPath: String? // First existing `/Applications/<App>.app` or `~/Applications/<App>.app` path
+    public let hasQuarantine: Bool   // true when `.app` on disk has `com.apple.quarantine` extended attribute
 
     public init(
         name: String,
@@ -205,7 +216,9 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         downloadURL: String? = nil,
         tap: String? = nil,
         autoUpdates: Bool = false,
-        isAppBundleMissingOnDisk: Bool = false
+        isAppBundleMissingOnDisk: Bool = false,
+        resolvedAppPath: String? = nil,
+        hasQuarantine: Bool = false
     ) {
         self.name = name
         self.displayName = displayName
@@ -223,6 +236,8 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         self.tap = tap
         self.autoUpdates = autoUpdates
         self.isAppBundleMissingOnDisk = isAppBundleMissingOnDisk
+        self.resolvedAppPath = resolvedAppPath
+        self.hasQuarantine = hasQuarantine
     }
 
     public var isInstalled: Bool {
@@ -890,16 +905,16 @@ public struct BrewServiceItem: Codable, Identifiable, Hashable, Sendable {
     public var statusBadgeText: String {
         switch status.lowercased() {
         case "started":
-            return tr("运行中 (Started)", "執行中 (Started)", "Running (Started)")
+            return tr("运行中", "執行中", "Running")
         case "scheduled":
-            return tr("定时调度 (Scheduled)", "排程中 (Scheduled)", "Scheduled")
+            return tr("定时调度", "排程中", "Scheduled")
         case "stopped", "none":
-            return tr("未运行 (Stopped)", "未執行 (Stopped)", "Stopped")
+            return tr("未运行", "未執行", "Stopped")
         case "error":
             if let code = exit_code {
-                return tr("异常退出 (Exit \(code))", "異常結束 (Exit \(code))", "Error (Exit \(code))")
+                return tr("异常退出 (代码 \(code))", "異常結束 (代碼 \(code))", "Error (Code \(code))")
             }
-            return tr("异常 (Error)", "異常 (Error)", "Error")
+            return tr("异常", "異常", "Error")
         default:
             return status
         }
@@ -916,5 +931,130 @@ public enum BrewDoctorState: Equatable, Sendable {
     public var isRunning: Bool {
         if case .running = self { return true }
         return false
+    }
+}
+
+// MARK: - v3.0 UX Feedback & Package Inspector Models
+
+public enum TaskOutcomeAction: Equatable, Sendable {
+    case openApp(path: String, displayName: String)
+    case switchMirrorAndRetry
+    case retryTasks
+    case openTerminalLog
+    case openAppManagementSettings
+}
+
+public struct TaskOutcomeFeedback: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let isSuccess: Bool
+    public let title: String
+    public let subtitle: String?
+    public let primaryAction: TaskOutcomeAction?
+    public let secondaryAction: TaskOutcomeAction?
+    public let createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        isSuccess: Bool,
+        title: String,
+        subtitle: String? = nil,
+        primaryAction: TaskOutcomeAction? = nil,
+        secondaryAction: TaskOutcomeAction? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.isSuccess = isSuccess
+        self.title = title
+        self.subtitle = subtitle
+        self.primaryAction = primaryAction
+        self.secondaryAction = secondaryAction
+        self.createdAt = createdAt
+    }
+}
+
+public struct InspectedPackageTarget: Identifiable, Equatable, Sendable {
+    public var id: String { "\(type.rawValue):\(name)" }
+    public let name: String
+    public let displayName: String
+    public let type: PackageType
+    public let desc: String
+    public let homepage: String
+    public let installedVersion: String?
+    public let latestVersion: String
+    public let tap: String?
+    public let appBundles: [String]
+    public let resolvedAppPath: String?
+    public let isPinned: Bool
+    public let hasQuarantine: Bool
+    public let isDisabled: Bool
+    public let isDeprecated: Bool
+    public let lifecycleReason: String?
+    public let replacementPackage: String?
+
+    public init(from pkg: BrewPackage) {
+        self.name = pkg.name
+        self.displayName = pkg.displayName
+        self.type = pkg.type
+        self.desc = pkg.desc
+        self.homepage = pkg.homepage
+        self.installedVersion = pkg.installedVersion
+        self.latestVersion = pkg.latestVersion
+        self.tap = pkg.tap
+        self.appBundles = pkg.appBundles
+        self.resolvedAppPath = pkg.resolvedAppPath
+        self.isPinned = pkg.isPinned
+        self.hasQuarantine = pkg.hasQuarantine
+        self.isDisabled = false
+        self.isDeprecated = false
+        self.lifecycleReason = nil
+        self.replacementPackage = nil
+    }
+
+    public init(from entry: CatalogEntry, installedPkg: BrewPackage? = nil) {
+        self.name = entry.name
+        self.displayName = entry.displayName
+        self.type = entry.type
+        self.desc = entry.desc
+        self.homepage = entry.homepage
+        self.installedVersion = installedPkg?.installedVersion
+        self.latestVersion = entry.version.isEmpty ? (installedPkg?.latestVersion ?? "") : entry.version
+        self.tap = entry.tap ?? installedPkg?.tap
+        self.appBundles = !entry.appBundles.isEmpty ? entry.appBundles : (installedPkg?.appBundles ?? [])
+        self.resolvedAppPath = installedPkg?.resolvedAppPath
+        self.isPinned = installedPkg?.isPinned ?? false
+        self.hasQuarantine = installedPkg?.hasQuarantine ?? false
+        self.isDisabled = entry.isDisabled
+        self.isDeprecated = entry.isDeprecated
+        self.lifecycleReason = entry.localizedLifecycleReason
+        self.replacementPackage = entry.replacementPackage
+    }
+
+    public var qualifiedName: String {
+        if let tap, !tap.isEmpty, tap != "homebrew/core", tap != "homebrew/cask" {
+            return "\(tap)/\(name)"
+        }
+        return name
+    }
+}
+
+public struct PackageDetailInfo: Equatable, Sendable {
+    public let token: String
+    public let caveats: String?
+    public let dependencies: [String]
+    public let conflictsWith: [String]
+    public let installedDiskSize: String?
+
+    public init(
+        token: String,
+        caveats: String? = nil,
+        dependencies: [String] = [],
+        conflictsWith: [String] = [],
+        installedDiskSize: String? = nil
+    ) {
+        self.token = token
+        self.caveats = caveats
+        self.dependencies = dependencies
+        self.conflictsWith = conflictsWith
+        self.installedDiskSize = installedDiskSize
     }
 }

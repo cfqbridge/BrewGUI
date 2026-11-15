@@ -1216,6 +1216,39 @@ public enum ChineseSearchIndex {
         return entry.desc
     }
 
+    public static func localizedDescription(for pkg: BrewPackage) -> String {
+        guard AppLanguage.current.resolved != .en else {
+            return pkg.desc
+        }
+        let lower = pkg.name.lowercased()
+        if let m = curated[lower] {
+            if pkg.desc.isEmpty || pkg.desc.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
+                return m.zhDesc
+            }
+            return "\(m.zhDesc) · \(pkg.desc)"
+        }
+        return pkg.desc
+    }
+
+    public static func primaryCategory(for tokenLower: String, descLower: String) -> SearchCategoryPreset? {
+        if let m = curated[tokenLower] {
+            for cat in SearchCategoryPreset.allCases where cat != .all && cat != .essentials {
+                if m.categories.contains(cat) {
+                    return cat
+                }
+            }
+            if m.categories.contains(.essentials) {
+                return .essentials
+            }
+        }
+        for rule in englishKeywordRules {
+            if let cat = rule.category, rule.phrases.contains(where: { descLower.contains($0) }) {
+                return cat
+            }
+        }
+        return nil
+    }
+
     public static func inferredChineseTags(for entry: CatalogEntry) -> [String] {
         let haystack = entry.searchHaystackLower
         var matched: [String] = []

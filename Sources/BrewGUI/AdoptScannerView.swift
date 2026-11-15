@@ -36,13 +36,13 @@ public struct BatchInstallView: View {
             // Top Header
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(tr("批量识别与安装 (Batch Install & Brewfile)", "批次識別與安裝 (Batch Install & Brewfile)", "Batch Identify & Install (Brewfile)"))
+                    Text(tr("批量装机与备份迁移", "批次裝機與備份遷移", "Batch Install & Backup Migration"))
                         .font(.headline)
                     Text(
                         tr(
-                            "支持粘贴多个包名、`brew install` 命令或直接导入标准 `Brewfile`，自动识别 Formula / Cask / 第三方 Tap / 本机可接管 / 已安装状态。",
-                            "支援貼上多個套件名、`brew install` 命令或直接匯入標準 `Brewfile`，自動識別 Formula / Cask / 第三方 Tap / 本機可接管 / 已安裝狀態。",
-                            "Paste package names, `brew install ...` commands, or standard `Brewfile` contents to automatically detect Formula / Cask / Tap / Adoptable / Installed status."
+                            "一键备份本机已装软件清单，或粘贴软件名、导入备份文件快速恢复新机环境。",
+                            "一鍵備份本機已裝軟體清單，或貼上軟體名、匯入備份檔案快速恢復新機環境。",
+                            "Backup your Mac's software list in one click, or paste package names / import a backup file to restore on a new Mac."
                         )
                     )
                     .font(.caption)
@@ -53,6 +53,30 @@ public struct BatchInstallView: View {
 
                 Menu {
                     Button {
+                        store.saveBrewfileWithPanel()
+                    } label: {
+                        Label(tr("备份本机软件清单到文件 (Brewfile)…", "備份本機軟體清單到檔案 (Brewfile)…", "Save Backup List to File (Brewfile)…"), systemImage: "square.and.arrow.down")
+                    }
+
+                    Button {
+                        let bf = store.exportInstalledBrewfile()
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(bf, forType: .string)
+                        store.batchInputText = bf
+                        store.parseBatchInput()
+                        store.batchExportCopiedMessage = tr("已生成并复制备份清单", "已產生並複製備份清單", "Copied Backup List")
+                        store.latestOutcomeFeedback = TaskOutcomeFeedback(
+                            isSuccess: true,
+                            title: tr("已生成并复制本机软件备份清单", "已產生並複製本機軟體備份清單", "Copied Software Backup List"),
+                            subtitle: tr("已包含全部桌面应用、主动安装的命令行工具及第三方源", "已包含全部桌面應用、主動安裝的命令列工具及第三方源", "Includes all desktop apps, top-level CLI tools, and third-party taps")
+                        )
+                    } label: {
+                        Label(tr("生成并复制备份清单 (Brewfile)", "產生並複製備份清單 (Brewfile)", "Generate & Copy Backup List (Brewfile)"), systemImage: "doc.on.doc")
+                    }
+
+                    Divider()
+
+                    Button {
                         let cmd = store.exportInstalledCommands(twoLines: true)
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(cmd, forType: .string)
@@ -60,7 +84,7 @@ public struct BatchInstallView: View {
                         store.parseBatchInput()
                         store.batchExportCopiedMessage = tr("已导出并复制分行指令", "已匯出並複製分行指令", "Exported & copied 2-line commands")
                     } label: {
-                        Label(tr("导出分行命令 (Formula 与 Cask 分两行)", "匯出分行命令 (Formula 與 Cask 分兩行)", "Export 2-line Commands (Formulae & Casks separated)"), systemImage: "text.alignleft")
+                        Label(tr("导出为终端安装脚本（桌面与命令行分行）", "匯出為終端安裝腳本（桌面與命令列分行）", "Export as 2-Line Terminal Script"), systemImage: "text.alignleft")
                     }
 
                     Button {
@@ -71,35 +95,22 @@ public struct BatchInstallView: View {
                         store.parseBatchInput()
                         store.batchExportCopiedMessage = tr("已导出并复制单行指令", "已匯出並複製單行指令", "Exported & copied 1-line command")
                     } label: {
-                        Label(tr("导出单行合并命令", "匯出單行合併命令", "Export Single-Line Command"), systemImage: "line.3.horizontal")
-                    }
-
-                    Divider()
-
-                    Button {
-                        let bf = store.exportInstalledBrewfile()
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(bf, forType: .string)
-                        store.batchInputText = bf
-                        store.parseBatchInput()
-                        store.batchExportCopiedMessage = tr("已生成并复制标准 Brewfile", "已產生並複製標準 Brewfile", "Generated & copied Brewfile")
-                    } label: {
-                        Label(tr("导出标准 Brewfile (复制到剪贴板并预览)", "匯出標準 Brewfile (複製到剪貼簿並預覽)", "Export Standard Brewfile (Copy & Preview)"), systemImage: "doc.text")
-                    }
-
-                    Button {
-                        store.saveBrewfileWithPanel()
-                    } label: {
-                        Label(tr("导出并保存 Brewfile 文件…", "匯出並儲存 Brewfile 檔案…", "Export & Save Brewfile…"), systemImage: "square.and.arrow.down")
+                        Label(tr("导出为单行终端安装命令", "匯出為單行終端安裝命令", "Export as Single-Line Terminal Command"), systemImage: "line.3.horizontal")
                     }
                 } label: {
-                    Label(tr("导出指令 / Brewfile", "匯出指令 / Brewfile", "Export CLI / Brewfile"), systemImage: "square.and.arrow.up")
+                    Label(tr("备份本机清单", "備份本機清單", "Backup This Mac"), systemImage: "archivebox")
                 }
                 .menuStyle(.borderedButton)
                 .fixedSize()
-                .help(tr("将本机所有已托管顶层应用导出为 brew install 命令或标准 Brewfile，方便重装系统或换新机迁移", "將本機所有已託管頂層應用匯出為 brew install 命令或標準 Brewfile，方便重灌系統或換新機遷移", "Export all top-level installed Formulae, Casks, and Taps as `brew install` commands or a standard `Brewfile`"))
+                .help(tr("将本机所有已纳管的桌面应用、顶层命令行工具及第三方源导出备份，方便换新机或重装系统恢复", "將本機所有已納管的桌面應用、頂層命令列工具及第三方源匯出備份，方便換新機或重灌系統恢復", "Export all managed desktop apps, top-level CLI tools, and third-party sources for easy migration"))
 
                 Menu {
+                    Button {
+                        store.importBrewfileWithPanel()
+                    } label: {
+                        Label(tr("从文件导入备份清单 (Brewfile)…", "從檔案匯入備份清單 (Brewfile)…", "Import Backup File (Brewfile)…"), systemImage: "folder")
+                    }
+
                     Button {
                         if let str = NSPasteboard.general.string(forType: .string) {
                             store.batchInputText = str
@@ -107,16 +118,10 @@ public struct BatchInstallView: View {
                             store.parseBatchInput()
                         }
                     } label: {
-                        Label(tr("从剪贴板粘贴并识别", "從剪貼簿貼上並識別", "Paste from Clipboard & Parse"), systemImage: "doc.on.clipboard")
-                    }
-
-                    Button {
-                        store.importBrewfileWithPanel()
-                    } label: {
-                        Label(tr("从本地文件导入 Brewfile…", "從本機檔案匯入 Brewfile…", "Import Brewfile from File…"), systemImage: "folder")
+                        Label(tr("从剪贴板粘贴并自动识别", "從剪貼簿貼上並自動識別", "Paste from Clipboard & Parse"), systemImage: "doc.on.clipboard")
                     }
                 } label: {
-                    Label(tr("粘贴 / 导入", "貼上 / 匯入", "Paste / Import"), systemImage: "doc.on.clipboard")
+                    Label(tr("导入 / 粘贴", "匯入 / 貼上", "Import / Paste"), systemImage: "square.and.arrow.down.on.square")
                 }
                 .menuStyle(.borderedButton)
                 .fixedSize()
@@ -282,23 +287,23 @@ public struct BatchInstallView: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                    .background(Color(nsColor: .controlBackgroundColor))
 
                     Divider()
 
                     if store.batchItems.isEmpty {
                         VStack(spacing: 10) {
-                            Image(systemName: "list.bullet.clipboard")
+                            Image(systemName: "arrow.left.arrow.right.square")
                                 .font(.system(size: 36))
                                 .foregroundStyle(.secondary)
-                            Text(tr("在左侧粘贴包名后将自动在此处展示识别结果", "在左側貼上套件名後將自動在此處展示識別結果", "Paste package names on the left to preview parsed results here"))
+                            Text(tr("在左侧输入软件名称，或点击右上角「备份本机清单 / 导入」开始", "在左側輸入軟體名稱，或點擊右上角「備份本機清單 / 匯入」開始", "Paste package names on the left or click Backup / Import above"))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                             Text(
                                 tr(
-                                    "执行时将自动把 Formula 合并为单条命令统一解析依赖，并将 Cask 逐个排队以便单包跳过与立即可用。",
-                                    "執行時將自動把 Formula 合併為單條命令統一解析依賴，並將 Cask 逐個排隊以便單套件略過與立即可用。",
-                                    "Formulae are merged into a single command for shared dependency resolution, while Casks are queued individually."
+                                    "执行安装时，命令行工具将自动合并解析依赖，桌面应用将逐个独立排队下载。",
+                                    "執行安裝時，命令列工具將自動合併解析依賴，桌面應用將逐個獨立排隊下載。",
+                                    "CLI tools are installed together for shared dependency resolution, while desktop apps are queued individually."
                                 )
                             )
                             .font(.caption)
@@ -360,20 +365,23 @@ private struct BatchItemRow: View {
                 .buttonStyle(.plain)
                 .disabled(entry.isDisabled)
 
+                PackageIconView(
+                    token: entry.name,
+                    type: entry.type,
+                    desc: entry.desc,
+                    appPath: nil,
+                    size: 30
+                )
+
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(entry.displayName)
                             .font(.body.weight(.medium))
                             .strikethrough(entry.isDisabled)
                             .foregroundStyle(entry.isDisabled ? .secondary : .primary)
-                        if entry.displayName != entry.name {
-                            Text("(\(entry.name))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        BadgeView(text: entry.type.rawValue, color: entry.type == .cask ? .purple : .blue)
+                        BadgeView(text: entry.type.localizedHumanLabel, color: entry.type == .cask ? .purple : .blue)
                         if let tap = entry.tap, !tap.isEmpty {
-                            BadgeView(text: "Tap: \(tap)", color: .indigo)
+                            BadgeView(text: tr("第三方源", "第三方源", "3rd-Party"), color: .indigo)
                         }
                         if entry.isDisabled {
                             BadgeView(text: tr("已禁用", "已停用", "Disabled"), color: .red)
@@ -392,12 +400,13 @@ private struct BatchItemRow: View {
                         }
                     }
                     if entry.isDisabled {
-                        Text("\(tr("Homebrew 已禁用此包", "Homebrew 已停用此套件", "Disabled in Homebrew"))：\(entry.localizedLifecycleReason ?? "")")
+                        Text("\(tr("官方源已停止分发", "官方源已停止分發", "Disabled in Homebrew"))：\(entry.localizedLifecycleReason ?? "")")
                             .font(.caption)
                             .foregroundStyle(.red)
                             .lineLimit(1)
                     } else if !entry.desc.isEmpty {
-                        Text(entry.desc)
+                        let localizedDesc = ChineseSearchIndex.localizedDescription(for: entry)
+                        Text(localizedDesc.isEmpty ? entry.desc : localizedDesc)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -414,19 +423,27 @@ private struct BatchItemRow: View {
                 }
                 .buttonStyle(.plain)
 
+                PackageIconView(
+                    token: entry.name,
+                    type: entry.type,
+                    desc: entry.desc,
+                    appPath: AppIconProvider.shared.resolveExistingAppPath(for: entry.appBundles),
+                    size: 30
+                )
+
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(entry.displayName)
                             .font(.body.weight(.medium))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
-                        BadgeView(text: "Cask", color: .purple)
+                        BadgeView(text: entry.type.localizedHumanLabel, color: .purple)
                             .fixedSize()
                         if let tap = entry.tap, !tap.isEmpty {
-                            BadgeView(text: "Tap: \(tap)", color: .indigo)
+                            BadgeView(text: tr("第三方源", "第三方源", "3rd-Party"), color: .indigo)
                                 .fixedSize()
                         }
-                        BadgeView(text: "\(tr("检测到本地", "偵測到本機", "Local found:")) \(localApp)", color: .teal)
+                        BadgeView(text: "\(tr("本机已有", "本機已有", "On Mac:")) \(localApp)", color: .teal)
                             .fixedSize()
                         if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
                             BadgeView(
@@ -437,7 +454,8 @@ private struct BatchItemRow: View {
                         }
                     }
                     if !entry.desc.isEmpty {
-                        Text(entry.desc)
+                        let localizedDesc = ChineseSearchIndex.localizedDescription(for: entry)
+                        Text(localizedDesc.isEmpty ? entry.desc : localizedDesc)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -449,7 +467,7 @@ private struct BatchItemRow: View {
                 Button {
                     onToggleAdoptMode()
                 } label: {
-                    Text(item.useAdoptIfAvailable ? tr("模式: Adopt 接管", "模式: Adopt 接管", "Mode: Adopt") : tr("模式: 全新安装", "模式: 全新安裝", "Mode: Fresh Install"))
+                    Text(item.useAdoptIfAvailable ? tr("模式: 直接纳入", "模式: 直接納入", "Mode: Adopt") : tr("模式: 重新安装", "模式: 重新安裝", "Mode: Reinstall"))
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -462,12 +480,20 @@ private struct BatchItemRow: View {
                     .foregroundStyle(.green)
                     .font(.title3)
 
+                PackageIconView(
+                    token: pkg.name,
+                    type: pkg.type,
+                    desc: pkg.desc,
+                    appPath: pkg.resolvedAppPath,
+                    size: 30
+                )
+
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(pkg.displayName)
                             .font(.body.weight(.medium))
                             .foregroundStyle(.secondary)
-                        BadgeView(text: pkg.type.rawValue, color: .gray)
+                        BadgeView(text: pkg.type.localizedHumanLabel, color: .gray)
                         BadgeView(
                             text: tr("已安装 (\(pkg.installedVersion ?? ""))，自动跳过", "已安裝 (\(pkg.installedVersion ?? ""))，自動略過", "Installed (\(pkg.installedVersion ?? "")), skipped"),
                             color: .green
@@ -483,7 +509,7 @@ private struct BatchItemRow: View {
                 HStack(spacing: 6) {
                     Text(item.rawToken)
                         .font(.body.monospaced().weight(.medium))
-                    BadgeView(text: tr("未找到匹配的 Formula 或 Cask", "找不到符合的 Formula 或 Cask", "No matching Formula or Cask found"), color: .orange)
+                    BadgeView(text: tr("未找到匹配的软件包", "找不到符合的軟體套件", "Package not found"), color: .orange)
                 }
             }
 

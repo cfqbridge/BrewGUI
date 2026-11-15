@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v2.3.261114-blue.svg" alt="Release Version"></a>
+  <a href="https://github.com/cfqbridge/BrewGUI/releases"><img src="https://img.shields.io/badge/Release-v3.1.261115-blue.svg" alt="Release Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B%20%7C%20Apple%20Silicon-black.svg" alt="Platform"></a>
   <a href="#"><img src="https://img.shields.io/badge/Swift-6.0%20%7C%20Native%20AppKit%20%2B%20SwiftUI-orange.svg" alt="Swift"></a>
   <a href="#"><img src="https://img.shields.io/badge/i18n-简体中文%20%7C%20繁體中文%20%7C%20English-teal.svg" alt="i18n"></a>
@@ -48,11 +48,12 @@
 - **Smart `/Applications` Scanner & 4-Category Risk Advisories**: Automatically detects manually installed apps and flags **Mac App Store apps**, **version-locked production/plugin apps**, **apps with faster built-in updaters**, and **possible name/version collisions**, complete with a visual decision guide and one-click ignore for flagged items.
 - **Version-Aware Force Upgrade**: When a local app is older than the Homebrew Cask version, BrewGUI uses `brew install --cask --force` to adopt and upgrade the app in one step rather than merely claiming an outdated bundle.
 
-### 3. 📦 Installed Packages & On-Disk Bundle Verification
-- **Multi-Dimensional Filtering & Greedy Outdated (`--greedy`)**: Filter by Outdated, Top-Level (`brew leaves`), Formulae, Casks, or Pinned status (`brew pin` / `unpin`); toggle **Include Self-Updating (`--greedy`)** to detect and upgrade Casks with `auto_updates true` or `:latest` while automatically excluding orphaned Caskroom records whose `.app` bundles were removed from `/Applications`.
-- **Real `Info.plist` Version Check**: Cross-checks `/Applications/<App>.app/Contents/Info.plist` against Homebrew's recorded version to catch version drift.
-- **One-Click Gatekeeper Quarantine Removal**: Click the shield button (`xattr -dr com.apple.quarantine`) on any installed Cask to clear macOS "damaged / unverified developer" Gatekeeper prompts.
-- **Resilient Uninstall & `--zap` Fallback**: Uninstall Casks normally or with `--zap` to purge associated caches and preference files; if macOS Full Disk Access blocks protected paths (`com.apple.sharedfilelist`), BrewGUI automatically falls back to forced Cask removal and safely trashes remaining user-directory leftovers without leaving Caskroom backups behind.
+### 3. 📦 Visual Package Management, On-Demand Inspector & Contextual Flow (v3.0)
+- **Real App Icons & Low-Cognitive-Load Visual Language**: Installed desktop apps render their real high-resolution `/Applications` bundle icons (`NSCache`-backed), while un-installed packages and CLI tools display category-tinted semantic squircle icons. All technical CLI jargon (`Cask`, `Formula`, `Pinned`, `--greedy`, `--zap`) is replaced with clear human-friendly labels (`Desktop App`, `CLI Tool`, `Version Locked`, `Include Self-Updating Apps`).
+- **On-Demand Package Detail Sheet (`PackageDetailSheetView`)**: Click the `ⓘ` button on any package row to inspect its localized summary, size, install path, dependencies grid (`dependencies`), and Homebrew post-install configuration notes (`caveats` with one-click copy), keeping the main list clean and focused.
+- **Contextual Gatekeeper Unblock & Direct Open**: Automatically checks `com.apple.quarantine` via `getxattr` and surfaces the orange **Unblock** button *only* on apps that actually carry quarantine attributes; installed desktop apps feature a direct **Open** button across Search, Installed, and outcome banners.
+- **Natural Action Flow & Proportional Storage Bar**: Access **Backup & Restore** (`Brewfile` export/import) and **Filter Options** right from the Installed toolbar, with an inline prompt when self-updating apps have newer versions; the Maintenance view features a dual-color proportional bar comparing downloadable cache vs. app leftovers at a glance.
+- **Resilient Uninstall & `--zap` Fallback**: Uninstall desktop apps normally or clean all associated preferences/caches; if macOS Full Disk Access blocks protected paths (`com.apple.sharedfilelist`), BrewGUI automatically falls back to forced Cask removal and safely trashes remaining user-directory leftovers without leaving Caskroom backups behind.
 
 ### 4. 🧹 4-in-1 Advanced Maintenance (Cache / `:zap` Leftovers / Services / Doctor)
 - **Download Cache & Orphan Formulae**: Inspect every cached archive in `~/Library/Caches/Homebrew/downloads`, run `brew cleanup --prune=all`, and clean unused dependencies via `brew autoremove`.
@@ -66,9 +67,10 @@
 - **Hybrid Queue Scheduling**: Merges Formulae into a single dependency-shared command while queuing Casks individually so you can skip slow downloads at any time.
 - **Dual-Mode Export (CLI Command & Standard `Brewfile`)**: Export all top-level Formulae (`leaves`), Casks, and third-party Taps from your Mac as a CLI command or a standard `Brewfile`.
 
-### 6. 📊 Real-Time Download Speed & Task Control
-- **Live `.incomplete` Progress Tracking**: Monitors Homebrew's active download stream to display real-time percentage, downloaded bytes, and transfer speed (`KB/s`, `MB/s`).
-- **Full Queue Control**: Skip the current package, stop all tasks, remove queued items, or retry failed/skipped tasks with one click.
+### 6. 📊 Inline Live Progress, Outcome Feedback Banner & Backgrounded Console (v3.0)
+- **Inline Per-Row Progress**: Installing, upgrading, or uninstalling a package displays live download progress and transfer speed (`KB/s`, `MB/s`) directly inside the package row without forcing open the terminal console.
+- **Goal-Oriented Outcome Feedback Banner (`TaskOutcomeFeedback`)**: Raw console logs stay tucked in the background by default; upon completion, an actionable outcome banner appears at the bottom (e.g., "✅ Installed Raycast — Open Now", or automatic failure diagnosis with one-click **Switch to Mirror & Retry**, **Grant Permission**, or **View Log**).
+- **Full Queue Control**: Skip the current package, stop all tasks, remove queued items, retry failed tasks, or expand the secondary **Console Log** drawer anytime.
 
 ### 7. 🌐 Multi-Language (i18n) & In-App Self-Update (v1.6)
 - **Zero-Latency Language Switching**: Built-in **Simplified Chinese (`zh-Hans`)**, **Traditional Chinese (`zh-Hant`)**, and **English (`en`)** with System Default auto-detection. Switch languages anytime from the sidebar footer or menu bar popover without restarting.

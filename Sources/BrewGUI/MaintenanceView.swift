@@ -86,85 +86,118 @@ public struct MaintenanceView: View {
 
     @ViewBuilder
     private var cacheAndOrphansContent: some View {
-        // Action Bar for Cache & Orphans
-        HStack(spacing: 10) {
-            if !store.appLeftovers.isEmpty {
-                Button {
-                    store.maintenanceSubTab = .appLeftovers
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "paintbrush.pointed.fill")
-                            .foregroundStyle(.purple)
-                        Text(
-                            tr(
-                                "发现 \(store.appLeftovers.count) 项已卸载残留（\(AppConstants.formatBytes(store.totalLeftoversBytes))），点击清理 →",
-                                "發現 \(store.appLeftovers.count) 項已解除安裝殘留（\(AppConstants.formatBytes(store.totalLeftoversBytes))），點擊清理 →",
-                                "Found \(store.appLeftovers.count) leftovers (\(AppConstants.formatBytes(store.totalLeftoversBytes))) — clean →"
+        let totalReclaimable = store.totalCachedDownloadsBytes + store.totalLeftoversBytes
+        let cacheFraction: CGFloat = totalReclaimable > 0
+            ? max(0.08, CGFloat(store.totalCachedDownloadsBytes) / CGFloat(totalReclaimable))
+            : 0.5
+
+        // Visual Storage Overview & Action Bar
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 12) {
+                            Text(
+                                totalReclaimable > 0
+                                    ? tr("可安全释放空间：\(AppConstants.formatBytes(totalReclaimable))", "可安全釋放空間：\(AppConstants.formatBytes(totalReclaimable))", "Reclaimable: \(AppConstants.formatBytes(totalReclaimable))")
+                                    : tr("存储空间非常干净", "儲存空間非常乾淨", "Storage is Clean")
                             )
-                        )
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.purple)
+                            .font(.callout.weight(.semibold))
+                            .fixedSize(horizontal: true, vertical: false)
+
+                            if totalReclaimable > 0 {
+                                GeometryReader { geo in
+                                    HStack(spacing: 2) {
+                                        if store.totalCachedDownloadsBytes > 0 {
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(Color.orange)
+                                                .frame(width: max(12, geo.size.width * (store.totalLeftoversBytes > 0 ? cacheFraction : 1.0)))
+                                        }
+                                        if store.totalLeftoversBytes > 0 {
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(Color.purple)
+                                        }
+                                    }
+                                }
+                                .frame(width: 140, height: 6)
+                            }
+                        }
+
+                        HStack(spacing: 14) {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.orange).frame(width: 7, height: 7)
+                                Text("\(tr("安装包缓存", "安裝包快取", "Installer Cache")) \(AppConstants.formatBytes(store.totalCachedDownloadsBytes))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !store.appLeftovers.isEmpty {
+                                Button {
+                                    store.maintenanceSubTab = .appLeftovers
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Circle().fill(Color.purple).frame(width: 7, height: 7)
+                                        Text("\(tr("卸载残留", "殘留清理", "Leftovers")) \(AppConstants.formatBytes(store.totalLeftoversBytes)) →")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.purple)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
                 }
-                .buttonStyle(.plain)
-            } else {
-                Text(
-                    tr(
-                        "管理 `~/Library/Caches/Homebrew/downloads` 历史安装包与 `brew autoremove` 孤儿依赖",
-                        "管理 `~/Library/Caches/Homebrew/downloads` 歷史安裝包與 `brew autoremove` 孤兒依賴",
-                        "Inspect `~/Library/Caches/Homebrew/downloads` archives and `brew autoremove` orphan formulae"
-                    )
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
 
-            Spacer()
+                Spacer()
 
-            Button {
-                store.scanCachedDownloads()
-                Task {
-                    await store.scanOrphanFormulae()
-                    await store.scanAppLeftovers()
+                Button {
+                    store.scanCachedDownloads()
+                    Task {
+                        await store.scanOrphanFormulae()
+                        await store.scanAppLeftovers()
+                    }
+                } label: {
+                    Label(tr("重新扫描", "重新掃描", "Rescan"), systemImage: "arrow.clockwise")
                 }
-            } label: {
-                Label(tr("重新扫描", "重新掃描", "Rescan"), systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(store.isScanningOrphans)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(store.isScanningOrphans)
 
-            Button {
-                let dir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Caches/Homebrew/downloads")
-                NSWorkspace.shared.open(dir)
-            } label: {
-                Label(tr("打开缓存目录", "打開快取目錄", "Open Cache Folder"), systemImage: "folder")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button {
-                store.runCleanupAllCaches()
-            } label: {
-                if store.totalCachedDownloadsBytes > 0 {
-                    Label(
-                        tr(
-                            "一键清理缓存 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
-                            "一鍵清理快取 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
-                            "Clean Caches (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))"
-                        ),
-                        systemImage: "sparkles"
-                    )
-                } else {
-                    Label(tr("清理全部缓存", "清理全部快取", "Clean All Caches"), systemImage: "sparkles")
+                Button {
+                    let dir = FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Library/Caches/Homebrew/downloads")
+                    NSWorkspace.shared.open(dir)
+                } label: {
+                    Label(tr("打开缓存文件夹", "打開快取資料夾", "Open Folder"), systemImage: "folder")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    store.runCleanupAllCaches()
+                } label: {
+                    if store.totalCachedDownloadsBytes > 0 {
+                        Label(
+                            tr(
+                                "一键清理缓存 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
+                                "一鍵清理快取 (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))",
+                                "Clean Caches (\(AppConstants.formatBytes(store.totalCachedDownloadsBytes)))"
+                            ),
+                            systemImage: "sparkles"
+                        )
+                    } else {
+                        Label(tr("清理全部缓存", "清理全部快取", "Clean All Caches"), systemImage: "sparkles")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
 
         Divider()
