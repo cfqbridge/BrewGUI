@@ -48,6 +48,18 @@ public struct TerminalDrawerView: View {
                             color: .orange
                         )
                     }
+                } else if store.isProcessingQueue {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(tr("正在刷新软件状态…", "正在重新整理軟體狀態…", "Refreshing package status…"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !store.taskQueue.isEmpty {
+                        BadgeView(
+                            text: tr("后续排队 \(store.taskQueue.count) 项", "後續排隊 \(store.taskQueue.count) 項", "\(store.taskQueue.count) queued"),
+                            color: .orange
+                        )
+                    }
                 } else {
                     HStack(spacing: 6) {
                         Circle()

@@ -93,6 +93,8 @@ public final class BrewStore: ObservableObject {
     @Published public var batchItems: [BatchInstallItem] = []
     @Published public var batchExportCopiedMessage: String?
     @Published public var batchDetectedMissingTaps: [String] = []
+    @Published public var batchMemoApps: [BatchMemoApp] = []
+    @Published public var isBatchMemoExpanded: Bool = false
 
     // MenuBar & App Preferences (Language, Mirror Source, Silent Launch at Login, Auto Check Updates, Self-Update)
     @Published public var appLanguage: AppLanguage = AppLanguage.current {
@@ -186,6 +188,8 @@ public final class BrewStore: ObservableObject {
     private var lastIncompleteSnapshot: (path: String, bytes: Int64, time: Date)?
     private var lastValidDownloadTime: Date?
     private var smoothedSpeedBytesPerSec: Double = 0
+    private var postQueueMaintenanceTask: Task<Void, Never>?
+    private var pendingCatalogRebuildAfterMaintenance: Bool = false
 
     private init() {
         BrewCommandRunner.rotateLogIfNeeded()
@@ -986,7 +990,196 @@ public final class BrewStore: ObservableObject {
                 lines.append("cask \"\(c.name)\"")
             }
         }
+
+        // v3.2: Append non-invasive commented migration supplement for unmanaged /Applications apps
+        let supplement = scanUnmanagedApplicationsForMigrationSupplement()
+        if !supplement.casks.isEmpty || !supplement.appStoreApps.isEmpty || !supplement.standaloneApps.isEmpty {
+            lines.append("")
+            lines.append("# ==========================================")
+            lines.append("# " + tr(
+                "换机防漏补充清单（以下均为注释，不影响 brew bundle 标准执行；BrewGUI 导入时可按需勾选补装）",
+                "換機防漏補充清單（以下均為註解，不影響 brew bundle 標準執行；BrewGUI 匯入時可按需勾選補裝）",
+                "Migration Supplement (commented out so standard `brew bundle` stays unaffected; BrewGUI lets you opt-in on import)"
+            ))
+            lines.append("# ==========================================")
+
+            if !supplement.casks.isEmpty {
+                lines.append("# " + tr(
+                    "[未纳管但可通过 Homebrew 补装]",
+                    "[未納管但可透過 Homebrew 補裝]",
+                    "[Unmanaged apps available via Homebrew Cask]"
+                ))
+                for item in supplement.casks {
+                    let fullToken = (item.tap != nil && !item.tap!.isEmpty) ? "\(item.tap!)/\(item.token)" : item.token
+                    lines.append("# cask \"\(fullToken)\" # \(item.note)")
+                }
+            }
+
+            if !supplement.appStoreApps.isEmpty {
+                if !supplement.casks.isEmpty { lines.append("") }
+                lines.append("# " + tr(
+                    "[Mac App Store 商店应用（换机后请于 App Store「已购项目」恢复）]",
+                    "[Mac App Store 商店應用（換機後請於 App Store「已購項目」恢復）]",
+                    "[Mac App Store apps (restore from App Store Purchased on new Mac)]"
+                ))
+                for appName in supplement.appStoreApps {
+                    lines.append("# [App Store] \(appName)")
+                }
+            }
+
+            if !supplement.standaloneApps.isEmpty {
+                if !supplement.casks.isEmpty || !supplement.appStoreApps.isEmpty { lines.append("") }
+                lines.append("# " + tr(
+                    "[独立第三方软件备忘（Homebrew 未收录，换机时请手动下载）]",
+                    "[獨立第三方軟體備忘（Homebrew 未收錄，換機時請手動下載）]",
+                    "[Standalone apps not indexed in Homebrew (reinstall manually)]"
+                ))
+                for appName in supplement.standaloneApps {
+                    lines.append("# [独立软件] \(appName)")
+                }
+            }
+        }
+
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+    }
+
+    private struct MigrationSupplementResult {
+        struct SuggestedCask {
+            let token: String
+            let tap: String?
+            let note: String
+        }
+        let casks: [SuggestedCask]
+        let appStoreApps: [String]
+        let standaloneApps: [String]
+    }
+
+    private static func normalizeAppMatchKey(_ raw: String) -> String {
+        var base = raw
+        if base.lowercased().hasSuffix(".app") {
+            base = String(base.dropLast(4))
+        }
+        return base.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(String.init).joined()
+    }
+
+    /// Scans `/Applications` and `~/Applications` for apps not currently managed by Homebrew,
+    /// categorizing them into: Homebrew-installable unmanaged apps (.pkg or unadopted), Mac App Store apps, and standalone apps.
+    private func scanUnmanagedApplicationsForMigrationSupplement() -> MigrationSupplementResult {
+        let fm = FileManager.default
+        let appDirs = ["/Applications", fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]
+        let installedCaskTokens = Set(installedPackages.filter { $0.type == .cask }.map { $0.name.lowercased() })
+
+        // Pre-build lookup tables from catalog Casks (preferring non-variant tokens over @beta/@nightly)
+        var caskByExactAppBundle: [String: CatalogEntry] = [:]
+        var caskByNormalizedKey: [String: CatalogEntry] = [:]
+
+        func preferEntry(_ candidate: CatalogEntry, over existing: CatalogEntry?) -> Bool {
+            guard let existing else { return true }
+            let candIsVariant = candidate.name.contains("@")
+            let existIsVariant = existing.name.contains("@")
+            if existIsVariant && !candIsVariant { return true }
+            if !existIsVariant && candIsVariant { return false }
+            let candIsThirdParty = candidate.tap != nil
+            let existIsThirdParty = existing.tap != nil
+            if existIsThirdParty && !candIsThirdParty { return true }
+            return false
+        }
+
+        for entry in catalogEntries where entry.type == .cask && !entry.isDisabled {
+            for bundle in entry.appBundles {
+                let key = bundle.lowercased()
+                if preferEntry(entry, over: caskByExactAppBundle[key]) {
+                    caskByExactAppBundle[key] = entry
+                }
+            }
+            let nameKey = Self.normalizeAppMatchKey(entry.name)
+            if nameKey.count >= 3 && preferEntry(entry, over: caskByNormalizedKey[nameKey]) {
+                caskByNormalizedKey[nameKey] = entry
+            }
+            let displayKey = Self.normalizeAppMatchKey(entry.displayName)
+            if displayKey.count >= 3 && preferEntry(entry, over: caskByNormalizedKey[displayKey]) {
+                caskByNormalizedKey[displayKey] = entry
+            }
+        }
+
+        var seenAppNames = Set<String>()
+        var suggestedCaskTokensSeen = Set<String>()
+        var suggestedCasks: [MigrationSupplementResult.SuggestedCask] = []
+        var appStoreApps: [String] = []
+        var standaloneApps: [String] = []
+
+        for dir in appDirs {
+            guard let items = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for item in items.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+                guard item.hasSuffix(".app"), !item.hasPrefix(".") else { continue }
+                let lowerItem = item.lowercased()
+                guard !seenAppNames.contains(lowerItem) else { continue }
+                seenAppNames.insert(lowerItem)
+
+                // Already managed by Homebrew
+                if managedCaskAppBundles.contains(item) { continue }
+
+                let appPath = (dir as NSString).appendingPathComponent(item)
+                let isIOSWrapped = fm.fileExists(atPath: (appPath as NSString).appendingPathComponent("WrappedBundle"))
+                let masReceipt = (appPath as NSString).appendingPathComponent("Contents/_MASReceipt/receipt")
+                let iosReceipt = (appPath as NSString).appendingPathComponent("WrappedBundle/_MASReceipt/receipt")
+                let isAppStore = isIOSWrapped || fm.fileExists(atPath: masReceipt) || fm.fileExists(atPath: iosReceipt)
+
+                if isAppStore {
+                    appStoreApps.append(item)
+                    continue
+                }
+
+                // Skip built-in Apple system apps without App Store receipts (e.g. Safari.app)
+                let plistPath = (appPath as NSString).appendingPathComponent("Contents/Info.plist")
+                if let plistData = fm.contents(atPath: plistPath),
+                   let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
+                   let bundleId = plist["CFBundleIdentifier"] as? String,
+                   bundleId.hasPrefix("com.apple.") {
+                    continue
+                }
+
+                // 1. Exact .app bundle match (unadopted / ignored-adopt standard Cask)
+                if let entry = caskByExactAppBundle[lowerItem] {
+                    if installedCaskTokens.contains(entry.nameLower) { continue }
+                    if !suggestedCaskTokensSeen.contains(entry.nameLower) {
+                        suggestedCaskTokensSeen.insert(entry.nameLower)
+                        let note = tr(
+                            "本机已装 \(item) (未接管)",
+                            "本機已裝 \(item) (未接管)",
+                            "Installed locally: \(item) (unadopted)"
+                        )
+                        suggestedCasks.append(.init(token: entry.name, tap: entry.tap, note: note))
+                    }
+                    continue
+                }
+
+                // 2. Normalized name match (typically .pkg-installed Casks such as Adguard.app -> adguard)
+                let normKey = Self.normalizeAppMatchKey(item)
+                if normKey.count >= 3, let entry = caskByNormalizedKey[normKey] {
+                    if installedCaskTokens.contains(entry.nameLower) { continue }
+                    if !suggestedCaskTokensSeen.contains(entry.nameLower) {
+                        suggestedCaskTokensSeen.insert(entry.nameLower)
+                        let note = tr(
+                            "本机已装 \(item) (.pkg / 未纳管)",
+                            "本機已裝 \(item) (.pkg / 未納管)",
+                            "Installed locally: \(item) (.pkg / unmanaged)"
+                        )
+                        suggestedCasks.append(.init(token: entry.name, tap: entry.tap, note: note))
+                    }
+                    continue
+                }
+
+                // 3. Standalone app not indexed in Homebrew
+                standaloneApps.append(item)
+            }
+        }
+
+        return MigrationSupplementResult(
+            casks: suggestedCasks.sorted { $0.token.localizedStandardCompare($1.token) == .orderedAscending },
+            appStoreApps: appStoreApps.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
+            standaloneApps: standaloneApps.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        )
     }
 
     public func saveBrewfileWithPanel() {
@@ -1509,10 +1702,69 @@ public final class BrewStore: ObservableObject {
         // Supports both standard `Brewfile` syntax (`tap "user/repo"`, `brew "pkg"`, `cask "pkg"`)
         // and CLI / free-form package lists (`brew install ...`, spaces, commas, newlines).
         let stopWords: Set<String> = ["brew", "install", "reinstall", "--cask", "--casks", "--formula", "--formulae", "--adopt", "--force", "-f", "$"]
-        var extractedTokens: [String] = []
+        struct ExtractedTokenEntry {
+            let token: String
+            let isOptionalSupplement: Bool
+            let supplementNote: String?
+        }
+        var extractedTokens: [ExtractedTokenEntry] = []
         var referencedTaps: [String] = []
+        var parsedMemoApps: [BatchMemoApp] = []
+        var seenMemoKeys = Set<String>()
 
         for rawLine in batchInputText.split(whereSeparator: \.isNewline) {
+            let trimmedRaw = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // v3.2: Parse commented migration supplement lines (`# cask "..." # note`, `# [App Store] ...`, `# [独立软件] ...`)
+            if trimmedRaw.hasPrefix("#") {
+                let afterHash = String(trimmedRaw.dropFirst()).trimmingCharacters(in: .whitespaces)
+                if afterHash.hasPrefix("[App Store]") {
+                    let appName = String(afterHash.dropFirst("[App Store]".count)).trimmingCharacters(in: .whitespaces)
+                    let key = "mas:\(appName.lowercased())"
+                    if !appName.isEmpty && !seenMemoKeys.contains(key) {
+                        seenMemoKeys.insert(key)
+                        parsedMemoApps.append(BatchMemoApp(id: key, appName: appName, category: .appStore))
+                    }
+                    continue
+                }
+                for standalonePrefix in ["[独立软件]", "[獨立軟體]", "[Standalone]"] {
+                    if afterHash.hasPrefix(standalonePrefix) {
+                        let appName = String(afterHash.dropFirst(standalonePrefix.count)).trimmingCharacters(in: .whitespaces)
+                        let key = "standalone:\(appName.lowercased())"
+                        if !appName.isEmpty && !seenMemoKeys.contains(key) {
+                            seenMemoKeys.insert(key)
+                            parsedMemoApps.append(BatchMemoApp(id: key, appName: appName, category: .standalone))
+                        }
+                        break
+                    }
+                }
+                let commentParts = afterHash.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+                let directivePart = String(commentParts.first ?? "").trimmingCharacters(in: .whitespaces)
+                let notePart: String? = commentParts.count > 1
+                    ? String(commentParts[1]).trimmingCharacters(in: .whitespaces)
+                    : nil
+                if let caskPkg = Self.firstBrewfileDirectiveArg(directive: "cask", in: directivePart) {
+                    extractedTokens.append(ExtractedTokenEntry(token: "cask:\(caskPkg)", isOptionalSupplement: true, supplementNote: notePart))
+                    let parts = caskPkg.split(separator: "/")
+                    if parts.count == 3 {
+                        let tapPart = "\(parts[0])/\(parts[1])"
+                        if !referencedTaps.contains(where: { $0.caseInsensitiveCompare(tapPart) == .orderedSame }) {
+                            referencedTaps.append(tapPart)
+                        }
+                    }
+                } else if let brewPkg = Self.firstBrewfileDirectiveArg(directive: "brew", in: directivePart) {
+                    extractedTokens.append(ExtractedTokenEntry(token: "formula:\(brewPkg)", isOptionalSupplement: true, supplementNote: notePart))
+                    let parts = brewPkg.split(separator: "/")
+                    if parts.count == 3 {
+                        let tapPart = "\(parts[0])/\(parts[1])"
+                        if !referencedTaps.contains(where: { $0.caseInsensitiveCompare(tapPart) == .orderedSame }) {
+                            referencedTaps.append(tapPart)
+                        }
+                    }
+                }
+                continue
+            }
+
             let lineWithoutComment = String(rawLine.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !lineWithoutComment.isEmpty else { continue }
@@ -1533,7 +1785,7 @@ public final class BrewStore: ObservableObject {
                 continue
             }
             if let brewPkg = Self.firstBrewfileDirectiveArg(directive: "brew", in: lineWithoutComment) {
-                extractedTokens.append("formula:\(brewPkg)")
+                extractedTokens.append(ExtractedTokenEntry(token: "formula:\(brewPkg)", isOptionalSupplement: false, supplementNote: nil))
                 let parts = brewPkg.split(separator: "/")
                 if parts.count == 3 {
                     let tapPart = "\(parts[0])/\(parts[1])"
@@ -1544,7 +1796,7 @@ public final class BrewStore: ObservableObject {
                 continue
             }
             if let caskPkg = Self.firstBrewfileDirectiveArg(directive: "cask", in: lineWithoutComment) {
-                extractedTokens.append("cask:\(caskPkg)")
+                extractedTokens.append(ExtractedTokenEntry(token: "cask:\(caskPkg)", isOptionalSupplement: false, supplementNote: nil))
                 let parts = caskPkg.split(separator: "/")
                 if parts.count == 3 {
                     let tapPart = "\(parts[0])/\(parts[1])"
@@ -1561,7 +1813,7 @@ public final class BrewStore: ObservableObject {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty && !stopWords.contains($0.lowercased()) }
             for tok in lineTokens {
-                extractedTokens.append(tok)
+                extractedTokens.append(ExtractedTokenEntry(token: tok, isOptionalSupplement: false, supplementNote: nil))
                 let clean = tok.replacingOccurrences(of: "cask:", with: "").replacingOccurrences(of: "formula:", with: "")
                 let parts = clean.split(separator: "/")
                 if parts.count == 3 {
@@ -1572,6 +1824,8 @@ public final class BrewStore: ObservableObject {
                 }
             }
         }
+
+        self.batchMemoApps = parsedMemoApps
 
         // Check if any referenced third-party Tap is not yet tapped locally
         let knownTappedLower = Set(tappedRepositories.map { $0.lowercased() }).union(["homebrew/core", "homebrew/cask"])
@@ -1588,14 +1842,21 @@ public final class BrewStore: ObservableObject {
             return !fm.fileExists(atPath: optPath) && !fm.fileExists(atPath: usrPath)
         }
 
-        // Deduplicate while preserving order
+        // Deduplicate while preserving order (primary non-comment entries take precedence over optional supplement entries)
         var seen = Set<String>()
-        var uniqueTokens: [String] = []
-        for t in extractedTokens {
-            let key = t.lowercased()
+        var uniqueEntries: [ExtractedTokenEntry] = []
+        for entry in extractedTokens where !entry.isOptionalSupplement {
+            let key = entry.token.lowercased()
             if !seen.contains(key) {
                 seen.insert(key)
-                uniqueTokens.append(t)
+                uniqueEntries.append(entry)
+            }
+        }
+        for entry in extractedTokens where entry.isOptionalSupplement {
+            let key = entry.token.lowercased()
+            if !seen.contains(key) {
+                seen.insert(key)
+                uniqueEntries.append(entry)
             }
         }
 
@@ -1626,7 +1887,10 @@ public final class BrewStore: ObservableObject {
         }
 
         var parsed: [BatchInstallItem] = []
-        for token in uniqueTokens {
+        for extracted in uniqueEntries {
+            let token = extracted.token
+            let isOptional = extracted.isOptionalSupplement
+            let note = extracted.supplementNote
             let lower = token.lowercased()
             // Support explicit prefix like cask:wechat or homebrew/cask/wechat
             let cleanToken = (lower as NSString).lastPathComponent
@@ -1643,7 +1907,9 @@ public final class BrewStore: ObservableObject {
                         rawToken: token,
                         status: .alreadyInstalled(inst),
                         isSelected: false,
-                        useAdoptIfAvailable: false
+                        useAdoptIfAvailable: false,
+                        isOptionalSupplement: isOptional,
+                        supplementNote: note
                     )
                 )
                 continue
@@ -1666,8 +1932,10 @@ public final class BrewStore: ObservableObject {
                             id: token,
                             rawToken: token,
                             status: .readyToAdopt(entry, adoptApp),
-                            isSelected: true,
-                            useAdoptIfAvailable: true
+                            isSelected: !isOptional,
+                            useAdoptIfAvailable: true,
+                            isOptionalSupplement: isOptional,
+                            supplementNote: note
                         )
                     )
                 } else {
@@ -1676,8 +1944,10 @@ public final class BrewStore: ObservableObject {
                             id: token,
                             rawToken: token,
                             status: .readyToInstall(entry),
-                            isSelected: !entry.isDisabled,
-                            useAdoptIfAvailable: false
+                            isSelected: !isOptional && !entry.isDisabled,
+                            useAdoptIfAvailable: false,
+                            isOptionalSupplement: isOptional,
+                            supplementNote: note
                         )
                     )
                 }
@@ -1688,7 +1958,9 @@ public final class BrewStore: ObservableObject {
                         rawToken: token,
                         status: .notFound,
                         isSelected: false,
-                        useAdoptIfAvailable: false
+                        useAdoptIfAvailable: false,
+                        isOptionalSupplement: isOptional,
+                        supplementNote: note
                     )
                 )
             }
@@ -1706,6 +1978,10 @@ public final class BrewStore: ObservableObject {
     /// Selects only Formulae and Casks whose probed size is <= maxBytes (default 100 MB), unchecking large Cask installers.
     public func selectOnlyLightweightBatchItems(maxBytes: Int64 = 100 * 1024 * 1024) {
         for idx in batchItems.indices {
+            if batchItems[idx].isOptionalSupplement {
+                batchItems[idx].isSelected = false
+                continue
+            }
             switch batchItems[idx].status {
             case .readyToInstall(let entry), .readyToAdopt(let entry, _):
                 if entry.type == .formula {
@@ -2870,146 +3146,158 @@ public final class BrewStore: ObservableObject {
         isProcessingQueue = true
         stopAllRequested = false
         skipCurrentRequested = false
-        startDownloadMonitor()
-        defer {
-            stopDownloadMonitor()
-            isProcessingQueue = false
-        }
 
         var needsCatalogRebuild = rebuildCatalogAfter
         let preCleanupBytes = totalCachedDownloadsBytes
         var succeededTasks: [BrewTaskItem] = []
         var failedRecords: [(task: BrewTaskItem, output: String, exitCode: Int32)] = []
 
-        while !taskQueue.isEmpty {
-            if stopAllRequested {
-                taskQueue.removeAll()
-                break
+        defer {
+            stopDownloadMonitor()
+            isProcessingQueue = false
+            // Defensive guard: if any task arrived right as the queue was winding down, resume immediately
+            if !taskQueue.isEmpty && !stopAllRequested {
+                let carryRebuild = needsCatalogRebuild
+                Task { @MainActor [weak self] in
+                    await self?.processQueue(allowAutoUpdate: false, rebuildCatalogAfter: carryRebuild)
+                }
+            } else {
+                schedulePostQueueMaintenance(needsCatalogRebuild: needsCatalogRebuild)
             }
+        }
 
-            var task = taskQueue.removeFirst()
-            task.status = .running
-            task.startedAt = Date()
-            currentTask = task
-            skipCurrentRequested = false
-            currentTaskOutputSlice = ""
-
-            let timestamp = Self.dateTimeFormatter.string(from: Date())
-            appendLog("\n[\(timestamp)] $ \(task.commandDescription)\n")
-
-            if !task.appBundlesToQuit.isEmpty {
-                quitRunningAppsIfNeeded(appBundles: task.appBundlesToQuit, reason: task.quitReason)
-            }
-
-            let firstArg = task.arguments.first ?? ""
-            let isUpdateCommand = firstArg == "update"
-            if isUpdateCommand || firstArg == "tap" || firstArg == "untap" {
-                needsCatalogRebuild = true
-            }
-
-            do {
-                var exitCode = try await BrewCommandRunner.shared.runStreaming(
-                    arguments: task.arguments,
-                    allowAutoUpdate: isUpdateCommand || allowAutoUpdate
-                ) { [weak self] chunk in
-                    Task { @MainActor in
-                        self?.currentTaskOutputSlice.append(chunk)
-                        self?.appendLog(chunk)
-                    }
+        while true {
+            startDownloadMonitor()
+            while !taskQueue.isEmpty {
+                if stopAllRequested {
+                    taskQueue.removeAll()
+                    break
                 }
 
-                // Resilient fallback for `brew uninstall --cask --zap`:
-                // When macOS Full Disk Access blocks `~/Library/Application Support/com.apple.sharedfilelist/...`,
-                // Homebrew aborts mid-way leaving the backed-up .app in Caskroom (causing deadlocks on retry).
-                // Automatically fallback to `brew uninstall --cask --force <token>` and safely trash remaining user-level :zap paths.
-                if exitCode != 0,
-                   !stopAllRequested,
-                   !skipCurrentRequested,
-                   task.arguments.first == "uninstall",
-                   task.arguments.contains("--cask"),
-                   task.arguments.contains("--zap"),
-                   let caskToken = task.arguments.last,
-                   !caskToken.hasPrefix("-") {
-                    appendLog(
-                        "\n" + tr(
-                            "[容错兜底] 检测到 --zap 深度清理受 macOS 完全磁盘访问权限 (Full Disk Access) 限制中断，正在自动回退执行强制卸载并安全清理用户目录残留…\n",
-                            "[容錯兜底] 偵測到 --zap 深度清理受 macOS 完全磁碟取用權限 (Full Disk Access) 限制中斷，正在自動回退執行強制解除安裝並安全清理使用者目錄殘留…\n",
-                            "[Resilient Fallback] --zap was blocked by macOS Full Disk Access; falling back to forced Cask uninstall and safe leftover cleanup…\n"
-                        )
-                    )
-                    let fallbackArgs = ["uninstall", "--cask", "--force", caskToken]
-                    let fbStamp = Self.dateTimeFormatter.string(from: Date())
-                    appendLog("[\(fbStamp)] $ brew \(fallbackArgs.joined(separator: " "))\n")
-                    let fallbackExit = (try? await BrewCommandRunner.shared.runStreaming(
-                        arguments: fallbackArgs,
-                        allowAutoUpdate: false
+                var task = taskQueue.removeFirst()
+                task.status = .running
+                task.startedAt = Date()
+                currentTask = task
+                skipCurrentRequested = false
+                currentTaskOutputSlice = ""
+
+                let timestamp = Self.dateTimeFormatter.string(from: Date())
+                appendLog("\n[\(timestamp)] $ \(task.commandDescription)\n")
+
+                if !task.appBundlesToQuit.isEmpty {
+                    quitRunningAppsIfNeeded(appBundles: task.appBundlesToQuit, reason: task.quitReason)
+                }
+
+                let firstArg = task.arguments.first ?? ""
+                let isUpdateCommand = firstArg == "update"
+                if isUpdateCommand || firstArg == "tap" || firstArg == "untap" {
+                    needsCatalogRebuild = true
+                }
+
+                do {
+                    var exitCode = try await BrewCommandRunner.shared.runStreaming(
+                        arguments: task.arguments,
+                        allowAutoUpdate: isUpdateCommand || allowAutoUpdate
                     ) { [weak self] chunk in
                         Task { @MainActor in
                             self?.currentTaskOutputSlice.append(chunk)
                             self?.appendLog(chunk)
                         }
-                    }) ?? -1
-
-                    await cleanSafeZapResiduesAfterUninstall(forCaskToken: caskToken)
-
-                    let caskroomPath = "/opt/homebrew/Caskroom/\(caskToken)"
-                    if fallbackExit == 0 || !FileManager.default.fileExists(atPath: caskroomPath) {
-                        exitCode = 0
                     }
-                }
 
-                task.exitCode = exitCode
-                task.finishedAt = Date()
+                    // Resilient fallback for `brew uninstall --cask --zap`:
+                    // When macOS Full Disk Access blocks `~/Library/Application Support/com.apple.sharedfilelist/...`,
+                    // Homebrew aborts mid-way leaving the backed-up .app in Caskroom (causing deadlocks on retry).
+                    // Automatically fallback to `brew uninstall --cask --force <token>` and safely trash remaining user-level :zap paths.
+                    if exitCode != 0,
+                       !stopAllRequested,
+                       !skipCurrentRequested,
+                       task.arguments.first == "uninstall",
+                       task.arguments.contains("--cask"),
+                       task.arguments.contains("--zap"),
+                       let caskToken = task.arguments.last,
+                       !caskToken.hasPrefix("-") {
+                        appendLog(
+                            "\n" + tr(
+                                "[容错兜底] 检测到 --zap 深度清理受 macOS 完全磁盘访问权限 (Full Disk Access) 限制中断，正在自动回退执行强制卸载并安全清理用户目录残留…\n",
+                                "[容錯兜底] 偵測到 --zap 深度清理受 macOS 完全磁碟取用權限 (Full Disk Access) 限制中斷，正在自動回退執行強制解除安裝並安全清理使用者目錄殘留…\n",
+                                "[Resilient Fallback] --zap was blocked by macOS Full Disk Access; falling back to forced Cask uninstall and safe leftover cleanup…\n"
+                            )
+                        )
+                        let fallbackArgs = ["uninstall", "--cask", "--force", caskToken]
+                        let fbStamp = Self.dateTimeFormatter.string(from: Date())
+                        appendLog("[\(fbStamp)] $ brew \(fallbackArgs.joined(separator: " "))\n")
+                        let fallbackExit = (try? await BrewCommandRunner.shared.runStreaming(
+                            arguments: fallbackArgs,
+                            allowAutoUpdate: false
+                        ) { [weak self] chunk in
+                            Task { @MainActor in
+                                self?.currentTaskOutputSlice.append(chunk)
+                                self?.appendLog(chunk)
+                            }
+                        }) ?? -1
 
-                let endStamp = Self.dateTimeFormatter.string(from: Date())
-                if stopAllRequested {
-                    task.status = .cancelled
-                    currentTask = task
-                    appendLog("[\(endStamp)] ⏹ \(tr("已停止", "已停止", "Stopped")) (\(task.title))\n")
-                    break
-                } else if skipCurrentRequested {
-                    task.status = .skipped
-                    currentTask = task
-                    if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
-                        lastFailedOrSkippedTasks.append(task)
+                        await cleanSafeZapResiduesAfterUninstall(forCaskToken: caskToken)
+
+                        let caskroomPath = "/opt/homebrew/Caskroom/\(caskToken)"
+                        if fallbackExit == 0 || !FileManager.default.fileExists(atPath: caskroomPath) {
+                            exitCode = 0
+                        }
                     }
-                    appendLog("[\(endStamp)] ⏭ \(tr("已跳过", "已略過", "Skipped")) (\(task.title))\n")
-                } else if exitCode == 0 {
-                    task.status = .succeeded
-                    currentTask = task
-                    succeededTasks.append(task)
-                    lastFailedOrSkippedTasks.removeAll { $0.commandDescription == task.commandDescription }
-                    appendLog("[\(endStamp)] ✓ \(tr("完成", "完成", "Completed")) (\(task.title))\n")
-                } else {
+
+                    task.exitCode = exitCode
+                    task.finishedAt = Date()
+
+                    let endStamp = Self.dateTimeFormatter.string(from: Date())
+                    if stopAllRequested {
+                        task.status = .cancelled
+                        currentTask = task
+                        appendLog("[\(endStamp)] ⏹ \(tr("已停止", "已停止", "Stopped")) (\(task.title))\n")
+                        break
+                    } else if skipCurrentRequested {
+                        task.status = .skipped
+                        currentTask = task
+                        if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
+                            lastFailedOrSkippedTasks.append(task)
+                        }
+                        appendLog("[\(endStamp)] ⏭ \(tr("已跳过", "已略過", "Skipped")) (\(task.title))\n")
+                    } else if exitCode == 0 {
+                        task.status = .succeeded
+                        currentTask = task
+                        succeededTasks.append(task)
+                        lastFailedOrSkippedTasks.removeAll { $0.commandDescription == task.commandDescription }
+                        appendLog("[\(endStamp)] ✓ \(tr("完成", "完成", "Completed")) (\(task.title))\n")
+                    } else {
+                        task.status = .failed
+                        currentTask = task
+                        failedRecords.append((task, currentTaskOutputSlice, exitCode))
+                        if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
+                            lastFailedOrSkippedTasks.append(task)
+                        }
+                        appendLog("[\(endStamp)] ✗ \(tr("失败，退出码", "失敗，退出碼", "Failed with exit code")) \(exitCode) (\(task.title))\n")
+                    }
+                } catch {
                     task.status = .failed
+                    task.finishedAt = Date()
                     currentTask = task
-                    failedRecords.append((task, currentTaskOutputSlice, exitCode))
+                    failedRecords.append((task, error.localizedDescription, -1))
                     if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
                         lastFailedOrSkippedTasks.append(task)
                     }
-                    appendLog("[\(endStamp)] ✗ \(tr("失败，退出码", "失敗，退出碼", "Failed with exit code")) \(exitCode) (\(task.title))\n")
+                    appendLog("\n[\(tr("错误", "錯誤", "Error"))] \(tr("无法启动命令", "無法啟動命令", "Failed to launch command")): \(error.localizedDescription)\n")
                 }
-            } catch {
-                task.status = .failed
-                task.finishedAt = Date()
-                currentTask = task
-                failedRecords.append((task, error.localizedDescription, -1))
-                if !lastFailedOrSkippedTasks.contains(where: { $0.commandDescription == task.commandDescription }) {
-                    lastFailedOrSkippedTasks.append(task)
-                }
-                appendLog("\n[\(tr("错误", "錯誤", "Error"))] \(tr("无法启动命令", "無法啟動命令", "Failed to launch command")): \(error.localizedDescription)\n")
             }
-        }
+            stopDownloadMonitor()
 
-        // Unified state refresh once the entire taskQueue finishes or stops
-        await refreshInstalled()
-        await scanOrphanFormulae()
-        await refreshServices()
-        await refreshTaps()
-        scanCachedDownloads()
-        await scanAppLeftovers()
-        if needsCatalogRebuild {
-            await refreshCatalog(forceRebuild: true)
+            // Refresh only the fast, essential package & cache state before releasing the queue lock
+            await refreshInstalled()
+            scanCachedDownloads()
+
+            // If user enqueued new tasks while `refreshInstalled()` was running, consume them immediately instead of stranding them in `taskQueue`
+            if !taskQueue.isEmpty && !stopAllRequested {
+                continue
+            }
+            break
         }
 
         // Build human-centric v3.0 outcome feedback banner
@@ -3019,6 +3307,30 @@ public final class BrewStore: ObservableObject {
                 failed: failedRecords,
                 preCleanupBytes: preCleanupBytes
             )
+        }
+    }
+
+    /// Run slower secondary maintenance refreshes (orphans, services, taps, leftovers, catalog rebuild)
+    /// asynchronously after `isProcessingQueue` is released so user-initiated installs/upgrades never block or strand in the queue.
+    private func schedulePostQueueMaintenance(needsCatalogRebuild: Bool) {
+        if needsCatalogRebuild {
+            pendingCatalogRebuildAfterMaintenance = true
+        }
+        postQueueMaintenanceTask?.cancel()
+        postQueueMaintenanceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.scanOrphanFormulae()
+            guard !Task.isCancelled else { return }
+            await self.refreshServices()
+            guard !Task.isCancelled else { return }
+            await self.refreshTaps()
+            guard !Task.isCancelled else { return }
+            await self.scanAppLeftovers()
+            guard !Task.isCancelled else { return }
+            if self.pendingCatalogRebuildAfterMaintenance {
+                self.pendingCatalogRebuildAfterMaintenance = false
+                await self.refreshCatalog(forceRebuild: true)
+            }
         }
     }
 

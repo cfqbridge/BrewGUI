@@ -68,7 +68,7 @@ public struct BatchInstallView: View {
                         store.latestOutcomeFeedback = TaskOutcomeFeedback(
                             isSuccess: true,
                             title: tr("已生成并复制本机软件备份清单", "已產生並複製本機軟體備份清單", "Copied Software Backup List"),
-                            subtitle: tr("已包含全部桌面应用、主动安装的命令行工具及第三方源", "已包含全部桌面應用、主動安裝的命令列工具及第三方源", "Includes all desktop apps, top-level CLI tools, and third-party taps")
+                            subtitle: tr("已包含全部纳管软件、第三方源，以及未纳管/商店/独立软件换机防漏备忘", "已包含全部納管軟體、第三方源，以及未納管/商店/獨立軟體換機防漏備忘", "Includes managed packages, taps, plus commented unmanaged / App Store / standalone migration memo")
                         )
                     } label: {
                         Label(tr("生成并复制备份清单 (Brewfile)", "產生並複製備份清單 (Brewfile)", "Generate & Copy Backup List (Brewfile)"), systemImage: "doc.on.doc")
@@ -172,6 +172,8 @@ public struct BatchInstallView: View {
                                 store.batchExportCopiedMessage = nil
                                 store.batchDetectedMissingTaps = []
                                 store.batchItems = []
+                                store.batchMemoApps = []
+                                store.isBatchMemoExpanded = false
                             }
                             .buttonStyle(.plain)
                             .font(.caption)
@@ -335,6 +337,69 @@ public struct BatchInstallView: View {
                             }
                         }
                         .listStyle(.inset)
+
+                        if !store.batchMemoApps.isEmpty {
+                            let appStoreApps = store.batchMemoApps.filter { $0.category == .appStore }
+                            let standaloneApps = store.batchMemoApps.filter { $0.category == .standalone }
+                            Divider()
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.16)) {
+                                        store.isBatchMemoExpanded.toggle()
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "checklist")
+                                            .foregroundStyle(.teal)
+                                        Text(
+                                            tr(
+                                                "换机防漏备忘：App Store 商店应用 \(appStoreApps.count) 款 · 独立软件 \(standaloneApps.count) 款",
+                                                "換機防漏備忘：App Store 商店應用 \(appStoreApps.count) 款 · 獨立軟體 \(standaloneApps.count) 款",
+                                                "Migration Memo: \(appStoreApps.count) App Store · \(standaloneApps.count) Standalone"
+                                            )
+                                        )
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                        Spacer()
+                                        Image(systemName: store.isBatchMemoExpanded ? "chevron.down" : "chevron.up")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                if store.isBatchMemoExpanded {
+                                    ScrollView {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            if !appStoreApps.isEmpty {
+                                                Text(tr("Mac App Store（换机后于「已购项目」恢复）：", "Mac App Store（換機後於「已購項目」恢復）：", "Mac App Store (restore from Purchased):"))
+                                                    .font(.caption2.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                                Text(appStoreApps.map(\.appName).joined(separator: " · "))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.primary)
+                                                    .textSelection(.enabled)
+                                            }
+                                            if !standaloneApps.isEmpty {
+                                                Text(tr("独立第三方软件（需手动下载安装）：", "獨立第三方軟體（需手動下載安裝）：", "Standalone Apps (reinstall manually):"))
+                                                    .font(.caption2.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                                Text(standaloneApps.map(\.appName).joined(separator: " · "))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.primary)
+                                                    .textSelection(.enabled)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .frame(maxHeight: 110)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.teal.opacity(0.06))
+                        }
                     }
                 }
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
@@ -383,6 +448,9 @@ private struct BatchItemRow: View {
                         if let tap = entry.tap, !tap.isEmpty {
                             BadgeView(text: tr("第三方源", "第三方源", "3rd-Party"), color: .indigo)
                         }
+                        if item.isOptionalSupplement {
+                            BadgeView(text: tr("防漏补充", "防漏補充", "Optional"), color: .mint)
+                        }
                         if entry.isDisabled {
                             BadgeView(text: tr("已禁用", "已停用", "Disabled"), color: .red)
                         } else if entry.isDeprecated {
@@ -403,6 +471,11 @@ private struct BatchItemRow: View {
                         Text("\(tr("官方源已停止分发", "官方源已停止分發", "Disabled in Homebrew"))：\(entry.localizedLifecycleReason ?? "")")
                             .font(.caption)
                             .foregroundStyle(.red)
+                            .lineLimit(1)
+                    } else if let note = item.supplementNote, !note.isEmpty {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     } else if !entry.desc.isEmpty {
                         let localizedDesc = ChineseSearchIndex.localizedDescription(for: entry)
@@ -443,6 +516,10 @@ private struct BatchItemRow: View {
                             BadgeView(text: tr("第三方源", "第三方源", "3rd-Party"), color: .indigo)
                                 .fixedSize()
                         }
+                        if item.isOptionalSupplement {
+                            BadgeView(text: tr("防漏补充", "防漏補充", "Optional"), color: .mint)
+                                .fixedSize()
+                        }
                         BadgeView(text: "\(tr("本机已有", "本機已有", "On Mac:")) \(localApp)", color: .teal)
                             .fixedSize()
                         if let sizeBytes = probedSizeBytes, sizeBytes > 0 {
@@ -453,7 +530,12 @@ private struct BatchItemRow: View {
                             .fixedSize()
                         }
                     }
-                    if !entry.desc.isEmpty {
+                    if let note = item.supplementNote, !note.isEmpty {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else if !entry.desc.isEmpty {
                         let localizedDesc = ChineseSearchIndex.localizedDescription(for: entry)
                         Text(localizedDesc.isEmpty ? entry.desc : localizedDesc)
                             .font(.caption)

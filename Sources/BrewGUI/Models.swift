@@ -6,7 +6,7 @@ public enum AppConstants {
         if let shortVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !shortVer.isEmpty {
             return shortVer
         }
-        return "3.1.261115"
+        return "3.2.261121"
     }()
     public static let githubVersionJSONURL = "https://github.com/cfqbridge/BrewGUI/releases/latest/download/version.json"
     public static let githubMirrorPrefix = "https://ghfast.top/"
@@ -456,6 +456,19 @@ public struct BatchInstallItem: Identifiable, Hashable, Sendable {
     public let status: BatchMatchStatus
     public var isSelected: Bool
     public var useAdoptIfAvailable: Bool
+    public var isOptionalSupplement: Bool = false
+    public var supplementNote: String? = nil
+}
+
+public enum BatchMemoCategory: String, Sendable, Hashable {
+    case appStore
+    case standalone
+}
+
+public struct BatchMemoApp: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let appName: String
+    public let category: BatchMemoCategory
 }
 
 public enum TaskStatus: String, Sendable {
